@@ -1,6 +1,9 @@
 # InterSystems AI Hub ObjectScript Examples
 
-This directory contains comprehensive examples demonstrating the InterSystems AI Hub framework in ObjectScript.
+> [!IMPORTANT]
+> Please note this is prerelease software, and any APIs and functionality described in this document is subject to change without prior notice before the initial GA release of the AI Hub.
+
+This document describes comprehensive examples demonstrating the InterSystems AI Hub framework in ObjectScript. Please see the [User Guide](ObjectScript_SDK_Guide.md) and, for some examples, the [Advanced Features Guide](ObjectScript_SDK_Advanced.md) for a broader description of the functionalities.
 
 ## Directory Structure
 

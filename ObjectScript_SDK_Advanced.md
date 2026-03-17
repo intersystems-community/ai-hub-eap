@@ -1,13 +1,12 @@
 # InterSystems AI Hub - Advanced ObjectScript SDK features
 
-:warning: This document describes a number of *experimental* and advanced features of the AI Hub. 
-These capabilities may change significantly before, or even be excluded from the initial AI Hub GA release.
-Please use at your own risk, and do let us know what you think!
+> [!WARNING]
+> This document describes a number of *experimental* and advanced features of the AI Hub. 
+> These capabilities may change significantly before, or even be excluded from the initial GA release of the AI Hub.
+> Please use at your own risk, and do let us know what you think!
 
 
 ## Policy System
-
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
 
 Policies provide governance over tool execution.
 
@@ -422,8 +421,6 @@ Do agent.UseToolSet("MyApp.SecureFileTools")
 
 ## Nested Agents (RLM Pattern)
 
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
-
 The **Recursive Language Model (RLM)** pattern enables hierarchical task decomposition where parent agents spawn sub-agents to handle specialized subtasks. This is useful for breaking down complex tasks into manageable pieces with focused attention.
 
 ### What is RLM?
@@ -595,8 +592,6 @@ Do ##class(Sample.AI.Examples.NestedAgents).DirectSubagentCreation()
 
 ## Skills (%AI.Skill)
 
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
-
 A **Skill** is a declaratively-defined sub-agent that can be registered as a tool. It extends `%AI.SubAgent` and adds structured metadata (name, description, parameters, dependencies) via XData blocks. When a parent agent registers a Skill as a tool, it appears with the Skill's description so the LLM knows what it does and when to invoke it.
 
 ### Defining a Skill (ObjectScript subclass)
@@ -736,8 +731,6 @@ The IRIS AI RAG stack consists of three objects that you build in order:
 
 ### Embedding Providers
 
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
-
 #### FastEmbed (local, no API key)
 
 `%AI.RAG.Embedding.FastEmbed` runs the AllMiniLML6V2 ONNX model entirely in-process via
@@ -816,8 +809,6 @@ $$$ThrowOnError(emb.Register())
 ---
 
 ### Vector Store
-
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
 
 `%AI.RAG.VectorStore.IRIS` creates and manages an IRIS SQL table. DDL runs in ObjectScript
 (`Build()`); all DML (inserts, similarity search, deletes) runs in Rust for performance.

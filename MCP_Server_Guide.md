@@ -2,7 +2,7 @@
 
 This guide covers how to use **iris-mcp-server** to expose IRIS tools to LLM clients via the Model Context Protocol (MCP).
 
-For detailed information about creating tools and toolsets in ObjectScript, see the [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md).
+For detailed information about creating tools and toolsets in ObjectScript, see the [ObjectScript User Guide](ObjectScript_SDK_Guide.md).
 
 ## Table of Contents
 
