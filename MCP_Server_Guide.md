@@ -1,29 +1,77 @@
 # iris-mcp-server User Guide
 
-This guide covers how to use **iris-mcp-server** to expose IRIS tools to LLM clients via the Model Context Protocol (MCP).
+This guide covers how to install, configure, and run **iris-mcp-server** to expose IRIS tools to LLM clients via the Model Context Protocol (MCP).
 
-For detailed information about creating tools and toolsets in ObjectScript, see the [ObjectScript User Guide](ObjectScript_SDK_Guide.md).
+For detailed information about creating tools and toolsets in ObjectScript, see the [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md).
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Configuration](#configuration)
-- [IRIS Backend Setup](#iris-backend-setup)
-- [Running iris-mcp-server](#running-iris-mcp-server)
-- [Transport Modes](#transport-modes)
-- [Security & Credentials](#security--credentials)
-- [Service Discovery](#service-discovery)
-- [Monitoring & Telemetry](#monitoring--telemetry)
-- [Production Deployment](#production-deployment)
-- [Troubleshooting](#troubleshooting)
+- [iris-mcp-server User Guide](#iris-mcp-server-user-guide)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Quick Start](#quick-start)
+    - [1. Create IRIS Backend](#1-create-iris-backend)
+    - [2. Configure Web Application](#2-configure-web-application)
+    - [3. Run iris-mcp-server](#3-run-iris-mcp-server)
+    - [4. Configure Claude Desktop](#4-configure-claude-desktop)
+  - [Architecture](#architecture)
+    - [Protocol Stack](#protocol-stack)
+    - [Protocol Flow](#protocol-flow)
+  - [Configuration](#configuration)
+    - [Full TOML Reference](#full-toml-reference)
+    - [Secret References](#secret-references)
+    - [CLI Flags](#cli-flags)
+    - [Configuration Priority](#configuration-priority)
+  - [Transport Modes](#transport-modes)
+    - [stdio (Claude Desktop)](#stdio-claude-desktop)
+    - [HTTP (Remote MCP)](#http-remote-mcp)
+    - [HTTPS (Remote MCP with TLS)](#https-remote-mcp-with-tls)
+    - [Local IRIS Auto-Discovery](#local-iris-auto-discovery)
+  - [Security \& Credentials](#security--credentials)
+    - [Layer 1 — Authenticating iris-mcp-server to IRIS](#layer-1--authenticating-iris-mcp-server-to-iris)
+    - [Layer 2 — MCP Server Credentials](#layer-2--mcp-server-credentials)
+    - [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough)
+    - [HashiCorp Vault Integration](#hashicorp-vault-integration)
+    - [wgproto TLS (IRIS Connection)](#wgproto-tls-iris-connection)
+    - [Server-Side TLS (Remote MCP Endpoint)](#server-side-tls-remote-mcp-endpoint)
+  - [IRIS Backend Setup](#iris-backend-setup)
+    - [Simple Tool](#simple-tool)
+    - [ToolSet with Policies](#toolset-with-policies)
+    - [MCP Service Class](#mcp-service-class)
+    - [Configure Web Application](#configure-web-application)
+  - [Service Discovery](#service-discovery)
+    - [How Discovery Works](#how-discovery-works)
+    - [Tool Refresh](#tool-refresh)
+    - [Endpoint Auto-Discovery](#endpoint-auto-discovery)
+    - [Local IRIS Instance Auto-Discovery](#local-iris-instance-auto-discovery)
+    - [Tool Namespacing](#tool-namespacing)
+    - [Reconnection](#reconnection)
+  - [The iris\_status Diagnostic Tool](#the-iris_status-diagnostic-tool)
+  - [Smart Discovery (RAG)](#smart-discovery-rag)
+  - [Monitoring \& Telemetry](#monitoring--telemetry)
+    - [Logging](#logging)
+    - [OpenTelemetry Tracing](#opentelemetry-tracing)
+    - [Verifying Tool Discovery](#verifying-tool-discovery)
+  - [Production Deployment](#production-deployment)
+    - [Container](#container)
+    - [Kubernetes](#kubernetes)
+    - [Connection Pool Sizing](#connection-pool-sizing)
+  - [Troubleshooting](#troubleshooting)
+    - [Connection Failures](#connection-failures)
+    - [Connected but No Tools Appear](#connected-but-no-tools-appear)
+    - [Tool Not Found](#tool-not-found)
+    - [Authentication Failures (403)](#authentication-failures-403)
+    - [Secret Resolution Failures](#secret-resolution-failures)
+    - [Debug Logging](#debug-logging)
+  - [Next Steps](#next-steps)
 
-> **Installation:** `iris-mcp-server` is a standalone binary with no dependencies. You can find it in the kit's `bin` directory and move or copy it anywhere you need — no installation step required.
+> **Installation:** `iris-mcp-server` is a standalone binary included in the `bin` directory of your IRIS installation. No installation step is required — copy or reference it directly.
+
+---
 
 ## Overview
 
-**iris-mcp-server** is a Rust-based MCP server that bridges LLM clients (like Claude Desktop) to IRIS tools using the wgproto (Web Gateway Protocol) for communication with IRIS.
+**iris-mcp-server** is a Rust-based MCP gateway that bridges LLM clients (Claude Desktop, remote MCP clients) to IRIS MCP Server endpoints, handling tool discovery and execution transparently.
 
 ```
 ┌─────────────────────┐
@@ -31,20 +79,17 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
 │   or other MCP      │
 │   compatible client │
 └──────────┬──────────┘
-           │ MCP Protocol
-           │ (stdio or HTTP)
+           │ MCP Protocol (stdio or HTTPS streaming)
            ▼
 ┌─────────────────────┐
-│  iris-mcp-server    │  (Rust)
+│  iris-mcp-server    │  (Rust binary)
 │                     │
 │  - MCP protocol     │
 │  - Tool discovery   │
 │  - Connection pool  │
 │  - RAG discovery    │
 └──────────┬──────────┘
-           │ wgproto
-           │ (Web Gateway Protocol)
-           │ STP Protocol
+           │ IRIS Gateway Protocol
            ▼
 ┌─────────────────────┐
 │  %AI.MCP.Service    │  (IRIS ObjectScript)
@@ -53,7 +98,6 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
 │  - Policy layer     │
 │  - ToolManager      │
 └──────────┬──────────┘
-           │
            ▼
 ┌─────────────────────┐
 │   Your Tools &      │
@@ -61,202 +105,511 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
 └─────────────────────┘
 ```
 
-**Key Transport Details**:
-- iris-mcp-server communicates with IRIS using **wgproto** (Web Gateway Protocol)
-- wgproto is the same low-level protocol that IIS/Apache web gateway modules use
-- IRIS %CSP.WebSocket endpoints are accessed through the web gateway protocol
-- This provides efficient, multiplexed connections to IRIS without requiring external web servers
+iris-mcp-server speaks the native Web Gateway Transport Protocol (wgproto), including over TLS, back to IRIS instance(s) — no external web server is required.
+
+---
 
 ## Quick Start
 
 ### 1. Create IRIS Backend
 
-Create a simple MCP service in IRIS (see [IRIS Backend Setup](#iris-backend-setup) for details):
+Create an MCP service in IRIS (see [IRIS Backend Setup](#iris-backend-setup) for details):
 
 ```objectscript
 Class MyApp.MCP.SimpleService Extends %AI.MCP.Service
 {
-    /// List tools, toolsets, or tool refs (rust:filesystem, etc.)
     Parameter SPECIFICATION As STRING = "MyApp.Tools.Calculator";
 }
 ```
 
 ### 2. Configure Web Application
 
-Create a CSP web application pointing to your service class:
-- Name: `/mcp/simple`
-- Dispatch Class: `MyApp.MCP.SimpleService`
+In the IRIS Management Portal create a CSP web application:
+- **Name:** `/mcp/simple`
+- **Dispatch Class:** `MyApp.MCP.SimpleService`
+- **Authentication:** Password (or Unauthenticated for dev)
 
 ### 3. Run iris-mcp-server
 
-```bash
-# Install (if not already installed)
-cargo install --path iris-mcp-server
+**Minimal — using CLI flags only (no config file):**
 
-# Run with stdio transport for Claude Desktop
-iris-mcp-server run \
-  --iris-host localhost \
-  --iris-port 52773 \
-  --iris-namespace USER \
-  --iris-mcp-path /mcp/simple \
-  --iris-username CSPSystem \
-  --iris-password SYS \
-  --transport stdio
+```powershell
+iris-mcp-server.exe `
+  --transport=stdio `
+  --log-output=file `
+  --log-file=iris-mcp.log `
+  run `
+  --iris-host=localhost `
+  --iris-port=52773 `
+  --iris-user=CSPSystem `
+  --iris-password=SYS `
+  --iris-namespace=USER `
+  --iris-endpoint=/mcp/simple
+```
+
+**Using a config file (recommended):**
+
+```powershell
+iris-mcp-server.exe --transport=stdio --config=config.toml run
 ```
 
 ### 4. Configure Claude Desktop
 
-Add to `claude_desktop_config.json`:
+Add to `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "iris-tools": {
-      "command": "iris-mcp-server",
+    "iris": {
+      "command": "C:\\path\\to\\iris-mcp-server.exe",
       "args": [
-        "run",
-        "--iris-host", "localhost",
-        "--iris-port", "52773",
-        "--iris-namespace", "USER",
-        "--iris-mcp-path", "/mcp/simple",
-        "--iris-username", "CSPSystem",
-        "--iris-password", "SYS",
-        "--transport", "stdio"
+        "--transport=stdio",
+        "--log-output=file",
+        "--log-file=C:\\path\\to\\iris-mcp.log",
+        "--config=C:\\path\\to\\config.toml",
+        "run"
       ]
     }
   }
 }
 ```
 
+Restart Claude Desktop. A gear icon appears when MCP servers are active. Claude logs are in `%APPDATA%\Claude\logs`.
+
+---
+
 ## Architecture
 
-### Component Overview
-
-- **iris-mcp-server**: MCP protocol server (Rust)
-  - Implements MCP specification
-  - Manages wgproto connection pooling to IRIS
-  - Handles tool discovery and execution
-  - Optional RAG-based smart discovery
-  - Optional Remote MCP endpoints (HTTP/SSE)
-
-- **%AI.MCP.Service**: IRIS backend (ObjectScript)
-  - REST endpoints for discovery and health
-  - WebSocket-style message handling via wgproto
-  - Creates ToolManager for tool dispatch
-  - Applies authorization and audit policies
-  - Routes tool calls to appropriate providers
-
-- **ToolManager**: IRIS tool registry (Rust + ObjectScript)
-  - Unified registry for all tool sources
-  - Policy enforcement layer
-  - Supports ObjectScript tools, Rust tools, MCP servers
-
-### Communication Protocol
-
-iris-mcp-server uses **wgproto** (Web Gateway Protocol) to communicate with IRIS:
-
-1. **wgproto** is the same low-level protocol used by IIS and Apache web gateway modules
-2. It provides WebSocket-like semantics without requiring an external web server
-3. Efficient multiplexing of multiple logical connections over pooled physical connections
-4. Built-in support for CSP sessions, authentication, and IRIS-specific features
-
-The **STP Protocol** (Stabilized Tool Protocol) is layered on top of wgproto for tool execution:
+### Protocol Stack
 
 ```
-Protocol Stack:
 ┌─────────────────────────┐
 │  MCP Protocol           │  (JSON-RPC 2.0)
 ├─────────────────────────┤
-│  iris-mcp-server        │  (Rust - Protocol translation)
+│  iris-mcp-server        │  (Rust — protocol translation)
 ├─────────────────────────┤
-│  STP Protocol           │  (JSON messages: request/response/error)
+│  STP Protocol           │  (JSON: request / response / error)
 ├─────────────────────────┤
-│  wgproto                │  (Web Gateway Protocol)
+│  wgproto                │  (IRIS native gateway protocol — binary)
 ├─────────────────────────┤
-│  HTTP/TCP               │
+│  TCP                    │
 └─────────────────────────┘
 ```
 
 ### Protocol Flow
 
+**Tool discovery:**
 ```
-1. Discovery:
-   LLM Client → MCP list_tools → iris-mcp-server
-   iris-mcp-server → (wgproto) GET /v1/services → IRIS
-   IRIS → ToolManager.%Discover() → JSON tool catalog
-   iris-mcp-server → MCP response → LLM Client
+LLM Client  →  MCP list_tools            →  iris-mcp-server
+iris-mcp-server  →  wgproto GET /v1/services  →  IRIS
+IRIS  →  ToolManager.%Discover()  →  JSON tool catalog
+iris-mcp-server  →  MCP response         →  LLM Client
+```
 
-2. Execution:
-   LLM Client → MCP call_tool → iris-mcp-server
-   iris-mcp-server → (wgproto) STP request → IRIS /v1/ws
-   IRIS → ToolManager.ExecuteTool() → (Auth → Execute → Audit) → result
-   result → (wgproto) STP response → iris-mcp-server
-   iris-mcp-server → MCP response → LLM Client
+**Tool execution:**
 ```
+LLM Client  →  MCP call_tool                    →  iris-mcp-server
+iris-mcp-server  →  wgproto+ws /v1/ws           →  IRIS
+IRIS  →  ToolManager.ExecuteTool()  →  (Auth → Execute → Audit)  →  result
+result  →  STP response                          →  iris-mcp-server
+iris-mcp-server  →  MCP response                →  LLM Client
+```
+
+---
 
 ## Configuration
 
-### Configuration File (TOML)
-
-Create `config.toml`:
+### Full TOML Reference
 
 ```toml
-[iris]
-host = "localhost"
-port = 52773
-namespace = "USER"
-username = "CSPSystem"
-password = "SYS"
-mcp_path = "/mcp/database"
-
-[pool]
-min_connections = 5
-max_connections = 20
-connection_timeout = 30
-
-[discovery]
-auto_discover = true
-interval_seconds = 60
-cache_ttl = 300
-
+# ── Server ───────────────────────────────────────────────────────────────────
 [server]
-transport = "stdio"  # or "http://0.0.0.0:8080"
-log_level = "info"
+transport  = "stdio"        # stdio | http | https  (overridden by --transport)
+host       = "0.0.0.0"     # bind address for HTTP/HTTPS transports
+port       = 8000           # bind port
+base_route = "/mcp"         # HTTP route prefix (default: /mcp)
+
+# TLS for the HTTP transport (optional — required when transport = "https")
+[server.tls]
+cert_file   = "/etc/certs/server.crt"  # path to PEM certificate
+key_file    = "/etc/certs/server.key"  # path to PEM private key
+# Alternatively, supply cert/key from the secret store:
+# cert_secret = "vault:tls/iris-mcp/certificate"
+# key_secret  = "vault:tls/iris-mcp/private_key"
+
+# ── IRIS Connection ───────────────────────────────────────────────────────────
+[iris]
+host      = "localhost"
+port      = 52773           # IRIS super-server port (default: 52773)
+namespace = "USER"
+
+# Credential fields accept a literal value, env:VAR, or vault:path/field
+username  = "env:IRIS_USER"
+password  = "env:IRIS_PASS"
+
+# MCP endpoint paths on IRIS (omit to auto-discover all /mcp* apps)
+mcp_endpoints = ["/mcp", "/mcp/myapp"]
+
+# Connection pool size per IRIS instance (default: 5)
+pool_size = 5
+
+# Seconds between reconnect attempts for lost connections (default: 30)
+reconnect_interval_secs = 30
+
+# Seconds between tool-list refresh polls (default: 300)
+tool_refresh_interval_secs = 300
+
+# Per-request IRIS application-layer auth (see Security section)
+# Use when no OAuth token is present (e.g. stdio transport).
+# Choose ONE of the two forms below:
+
+# Form 1 — HTTP Basic auth (sends Authorization: Basic base64(user:pass))
+[iris.user_auth]
+username = "env:IRIS_APP_USER"
+password = "env:IRIS_APP_PASS"
+
+# Form 2 — Arbitrary header (API keys, custom auth schemes)
+# [iris.user_auth]
+# header = "X-API-Key"
+# value  = "vault:iris/api_keys/mcp"
+
+# TLS for the wgproto connection to IRIS (optional).
+# Presence of [iris.tls] enables TLS; absence means plaintext.
+# When enabled, the IRIS web gateway must also be configured for TLS.
+[iris.tls]
+# Custom CA certificate — required if IRIS uses a self-signed or private CA cert.
+# Omit to use system certificate roots.
+# ca_cert_file   = "/etc/certs/iris-ca.crt"
+# ca_cert_secret = "vault:tls/iris/ca_cert"
+
+# Client certificate for mutual TLS (optional — both cert and key required together).
+# cert_file   = "/etc/certs/client.crt"
+# cert_secret = "vault:tls/iris-client/certificate"
+# key_file    = "/etc/certs/client.key"
+# key_secret  = "vault:tls/iris-client/private_key"
+
+# ── Connection Pools (MCP transport side) ────────────────────────────────────
+[connection_pools]
+# Limits for the stdio transport worker pool
+stdio.min = 2
+stdio.max = 5
+
+# Limits for the remote MCP HTTP transport session pool
+remote_mcp.min = 5
+remote_mcp.max = 20
+
+# ── Secret Provider ──────────────────────────────────────────────────────────
+[secrets]
+provider = "env"            # env | vault  (default: env)
+
+# Required only when provider = "vault":
+# vault_addr       = "http://127.0.0.1:8200"
+# vault_token      = "s.xxxx"            # literal token
+# vault_token_file = "/var/run/vault/token"  # or path to token file
+# vault_mount      = "secret"            # KV v2 mount (default: secret)
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+[logging]
+level  = "info"             # error | warn | info | debug | trace
+output = "stderr"           # stderr | file
+# file = "/var/log/iris-mcp.log"   # required when output = "file"
+
+# ── Optional Feature Toggles ─────────────────────────────────────────────────
+[features]
+smart_discovery = false     # enable RAG tool search (requires smart-discovery feature)
+telemetry       = false     # enable OpenTelemetry tracing
+vault           = false     # enable Vault secret provider
 ```
 
-Run with config file:
+### Secret References
 
-```bash
-iris-mcp-server run --config config.toml
-```
+Any credential field in `[iris]` or `[iris.user_auth]` accepts one of three formats:
 
-### Environment Variables
+| Format | Example | How it resolves |
+|--------|---------|-----------------|
+| **Literal** | `"CSPSystem"` | Used exactly as written |
+| **Environment variable** | `"env:IRIS_PASS"` | Reads `$IRIS_PASS` at startup |
+| **Vault KV2** | `"vault:iris/creds/password"` | Fetches from Vault at the path `<mount>/iris/creds`, field `password` |
 
-Override config values with environment variables:
+The Vault format is `vault:path/field` where `path` is relative to the configured `vault_mount`. Vault is only available when built with the `vault` feature and `[secrets] provider = "vault"` with `vault_addr` configured.
 
-```bash
-export IRIS_HOST="localhost"
-export IRIS_PORT="52773"
-export IRIS_NAMESPACE="USER"
-export IRIS_USERNAME="CSPSystem"
-export IRIS_PASSWORD="SYS"
-export IRIS_MCP_PATH="/mcp/database"
-export IRIS_POOL_MIN=5
-export IRIS_POOL_MAX=20
+### CLI Flags
 
-iris-mcp-server run
-```
+All flags before the subcommand are global:
+
+| Flag | Description |
+|------|-------------|
+| `--transport=<spec>` | `stdio`, `http://host:port`, `https://host:port`, `sse://host:port` |
+| `--config=<path>` | Path to TOML configuration file |
+| `--log-level=<level>` | `error` / `warn` / `info` / `debug` / `trace` (default: `info`) |
+| `--log-output=<out>` | `stderr` / `file` (default: `stderr`) |
+| `--log-file=<path>` | Log file path — required when `--log-output=file` |
+| `--http-tls-cert=<path>` | Server TLS certificate (PEM) — required with `https://` |
+| `--http-tls-key=<path>` | Server TLS private key (PEM) — required with `https://` |
+| `--http-base-route=<path>` | HTTP route prefix (default: `/mcp`) |
+
+`run` subcommand flags (all optional; override the `[iris]` config section):
+
+| Flag | Description |
+|------|-------------|
+| `--iris-host=<host>` | IRIS hostname or IP |
+| `--iris-port=<port>` | IRIS super-server port |
+| `--iris-user=<user>` | IRIS connection username |
+| `--iris-password=<pass>` | IRIS connection password |
+| `--iris-namespace=<ns>` | IRIS namespace |
+| `--iris-endpoint=<path>` | MCP endpoint path — may be repeated for multiple endpoints |
+| `--auto-discover-interval=<secs>` | Poll for local IRIS instances every N seconds (0 = disabled) |
+| `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
 
 ### Configuration Priority
 
-1. Command-line arguments (highest priority)
-2. Environment variables
-3. Configuration file
-4. Defaults (lowest priority)
+When the same value is specified in multiple places, the highest-priority source wins:
+
+```
+CLI flags  >  TOML config file  >  built-in defaults
+```
+
+Credentials in the TOML file are not overridden by environment variables directly — instead, use `env:VAR` references inside the TOML so that the environment variable is read at startup.
+
+---
+
+## Transport Modes
+
+### stdio (Claude Desktop)
+
+```powershell
+iris-mcp-server.exe `
+  --transport=stdio `
+  --log-output=file `
+  --log-file=iris-mcp.log `
+  --config=config.toml `
+  run
+```
+
+### HTTP (Remote MCP)
+
+```powershell
+iris-mcp-server.exe `
+  --transport=http://0.0.0.0:8000 `
+  --config=config.toml `
+  run
+```
+
+### HTTPS (Remote MCP with TLS)
+
+```powershell
+iris-mcp-server.exe `
+  --transport=https://0.0.0.0:8443 `
+  --http-tls-cert=cert.pem `
+  --http-tls-key=key.pem `
+  --config=config.toml `
+  run
+```
+
+TLS cert and key can also be supplied via the config file (including from Vault — see [Server-Side TLS](#server-side-tls)).
+
+### Local IRIS Auto-Discovery
+
+When `--auto-discover-interval` is set, iris-mcp-server polls for locally-running IRIS instances (via `iris qlist` on Linux/Mac, or the Windows Registry) and automatically connects to any that appear:
+
+```powershell
+iris-mcp-server.exe `
+  --transport=http://0.0.0.0:8000 `
+  --config=config.toml `
+  run --auto-discover-interval=60
+```
+
+---
+
+## Security & Credentials
+
+iris-mcp-server has two independent authentication layers that serve different purposes:
+
+| Layer | What it secures | Where configured |
+|-------|-----------------|-----------------|
+| **IRIS server auth** | iris-mcp-server connecting to the IRIS server | `[iris] username` / `password` |
+| **MCP server auth** | Per-request identity presented to the IRIS MCP Server endpoint | `[iris.user_auth]` |
+
+Understanding both layers is essential — authenticating the connection to IRIS does **not** automatically authenticate individual requests to the MCP Server endpoint inside it.
+
+### Layer 1 — Authenticating iris-mcp-server to IRIS
+
+`[iris] username` and `password` authenticate iris-mcp-server to the IRIS server itself. These must be a privileged gateway user such as `CSPSystem` (the same credential that IIS/Apache web gateway modules use).
+
+```toml
+[iris]
+host      = "localhost"
+port      = 52773
+namespace = "USER"
+username  = "CSPSystem"
+password  = "SYS"
+```
+
+These credentials are used once when the connection is established. For production, use secret references instead of literals:
+
+```toml
+[iris]
+username = "env:IRIS_GW_USER"
+password = "vault:iris/gateway/password"
+```
+
+> Never commit credentials to version control. Use `env:` references or Vault.
+
+### Layer 2 — MCP Server Credentials
+
+Once connected to IRIS, each request is made to a specific MCP Server endpoint — an IRIS-side definition that maps a URL path to a `%AI.MCP.Service` subclass. If that endpoint requires authentication, IRIS returns **403 Forbidden** unless user credentials accompany each request.
+
+**For Remote MCP (HTTP transport):** the `Authorization` header from the incoming MCP client session is automatically forwarded to IRIS. See [OAuth Passthrough](#remote-mcp-oauth-passthrough).
+
+**For stdio transport** (and Remote MCP sessions arriving without an `Authorization` header), configure a static fallback in `[iris.user_auth]`:
+
+```toml
+# HTTP Basic — sends: Authorization: Basic base64(username:password)
+[iris.user_auth]
+username = "env:IRIS_APP_USER"
+password = "env:IRIS_APP_PASS"
+```
+
+```toml
+# Arbitrary header — for API keys or custom schemes
+[iris.user_auth]
+header = "X-API-Key"
+value  = "vault:iris/api_keys/mcp"
+```
+
+**Choosing an auth mode:**
+
+| Scenario | Configuration |
+|----------|---------------|
+| Remote MCP + OAuth Bearer tokens | Omit `[iris.user_auth]` — the header is forwarded automatically |
+| stdio transport (any auth scheme) | Configure `[iris.user_auth]` |
+| Unauthenticated MCP Server endpoint | Omit `[iris.user_auth]`; set the endpoint to *Unauthenticated* |
+
+> **Security:** Unauthenticated endpoints expose tools to anyone who can reach the IRIS server. Only use *Unauthenticated* during local development. All production and shared environments should require authentication.
+
+### Remote MCP — OAuth Passthrough
+
+When iris-mcp-server runs in HTTP/HTTPS mode, each MCP session from a remote client carries its own `Authorization` header (commonly an OAuth 2.0 Bearer token). iris-mcp-server forwards the header value unchanged to IRIS on every request within that session. Any valid scheme (Bearer, API-key-as-Authorization, etc.) works without server-side changes.
+
+OAuth passthrough is always active for the HTTP/HTTPS transport. `[iris.user_auth]` acts as a fallback only when no `Authorization` header arrives from the client.
+
+### HashiCorp Vault Integration
+
+Vault is available when built with the `vault` feature (included in the `gateway` and `full` presets).
+
+**1. Configure the `[secrets]` section:**
+
+```toml
+[secrets]
+provider         = "vault"
+vault_addr       = "http://127.0.0.1:8200"
+vault_token      = "env:VAULT_TOKEN"        # token as env var reference
+# vault_token_file = "/var/run/vault/token" # or path to a token file
+vault_mount      = "secret"                 # KV v2 mount name (default: "secret")
+```
+
+> **Kubernetes:** use `vault_token_file` with a [projected service account token](https://developer.hashicorp.com/vault/docs/auth/kubernetes) volume rather than storing a static token in a Secret. Mount the projected token at a path like `/var/run/secrets/vault/token` and set `vault_token_file` to that path. The token is automatically rotated by Kubernetes and re-read by iris-mcp-server on the next startup.
+
+**2. Reference Vault secrets in credential fields:**
+
+```toml
+[iris]
+username = "vault:iris/gateway/username"   # reads <vault_mount>/iris/gateway, field "username"
+password = "vault:iris/gateway/password"
+
+[iris.user_auth]
+username = "vault:iris/app_user/username"
+password = "vault:iris/app_user/password"
+```
+
+The path format is `vault:path/field` where `path` is relative to `vault_mount`. For example, with `vault_mount = "secret"`, the reference `vault:iris/gateway/password` reads the field `password` from the Vault KV2 secret at `secret/data/iris/gateway`.
+
+**3. Set up the Vault secrets:**
+
+```bash
+# Enable KV v2 secrets engine (if not already enabled)
+vault secrets enable -path=secret kv-v2
+
+# Store IRIS gateway credentials
+vault kv put secret/iris/gateway \
+  username=CSPSystem \
+  password=SYS
+
+# Store IRIS application credentials
+vault kv put secret/iris/app_user \
+  username=_SYSTEM \
+  password=SYS
+
+# Store TLS private key
+vault kv put secret/tls/iris-mcp \
+  private_key=@/path/to/key.pem
+```
+
+**4. Run with the token in the environment:**
+
+```bash
+export VAULT_TOKEN="s.xxxx"
+iris-mcp-server --config=config.toml run
+```
+
+All secret references are resolved once at startup before any connections are established. If any secret fails to resolve, the server exits with an error.
+
+### wgproto TLS (IRIS Connection)
+
+To encrypt the wgproto connection between iris-mcp-server and IRIS, add an `[iris.tls]` section. The presence of the section (even empty) enables TLS — system certificate roots are used by default. The IRIS web gateway must also be configured for TLS when this is enabled.
+
+```toml
+# TLS with system roots — simplest form
+[iris.tls]
+
+# TLS with a custom or self-signed IRIS CA certificate
+[iris.tls]
+ca_cert_file = "/etc/certs/iris-ca.crt"
+# or from Vault:
+# ca_cert_secret = "vault:tls/iris/ca_cert"
+
+# Mutual TLS — iris-mcp-server presents a client certificate to IRIS
+[iris.tls]
+ca_cert_file = "/etc/certs/iris-ca.crt"
+cert_file    = "/etc/certs/client.crt"
+key_file     = "/etc/certs/client.key"
+# or from Vault:
+# cert_secret = "vault:tls/iris-client/certificate"
+# key_secret  = "vault:tls/iris-client/private_key"
+```
+
+> `[iris.tls]` is for the **wgproto connection to IRIS** only. It is independent of `[server.tls]`, which covers the Remote MCP endpoint.
+
+### Server-Side TLS (Remote MCP Endpoint)
+
+TLS for the HTTP transport endpoint is configured under `[server.tls]`. The cert and key can come from files or the secret store:
+
+```toml
+# Both from files (traditional)
+[server.tls]
+cert_file = "/etc/certs/server.crt"
+key_file  = "/etc/certs/server.key"
+
+# Key from Vault, cert from file
+[server.tls]
+cert_file  = "/etc/certs/server.crt"
+key_secret = "vault:tls/iris-mcp/private_key"
+
+# Both from Vault
+[server.tls]
+cert_secret = "vault:tls/iris-mcp/certificate"
+key_secret  = "vault:tls/iris-mcp/private_key"
+```
+
+Exactly one cert source (`cert_file` or `cert_secret`) and one key source (`key_file` or `key_secret`) must be provided.
+
+> `[server.tls]` secures the Remote MCP endpoint (LLM clients → iris-mcp-server). `[iris.tls]` secures the wgproto connection (iris-mcp-server → IRIS). These are configured independently and may use different certificates.
+
+---
 
 ## IRIS Backend Setup
 
-### Simple Tool (extends %AI.Tool)
+### Simple Tool
 
 ```objectscript
 Class MyApp.Tools.Calculator Extends %AI.Tool
@@ -273,9 +626,7 @@ Class MyApp.Tools.Calculator Extends %AI.Tool
 }
 ```
 
-### Composite ToolSet (extends %AI.ToolSet)
-
-Use the XML DSL to compose tools with policies:
+### ToolSet with Policies
 
 ```objectscript
 Class MyApp.ToolSet.Database Extends %AI.ToolSet
@@ -284,22 +635,13 @@ Class MyApp.ToolSet.Database Extends %AI.ToolSet
     {
         <ToolSet Name="DatabaseTools">
             <Description>SQL and database operations</Description>
-
-            <!-- Policies -->
             <Policies>
                 <Authorization Class="MyApp.Policy.ReadOnlyAuth" />
                 <Audit Class="%AI.Policy.ConsoleAudit" />
             </Policies>
-
-            <!-- Include existing tools -->
             <Include Class="%AI.Tools.SQL">
                 <Requirement Name="ReadOnly" Value="1"/>
             </Include>
-
-            <!-- Include Rust tool via ToolSet (applies policies) -->
-            <Tool Name="filesystem" Class="rust:filesystem">
-                <Description>File system operations</Description>
-            </Tool>
         </ToolSet>
     }
 }
@@ -310,385 +652,210 @@ Class MyApp.ToolSet.Database Extends %AI.ToolSet
 ```objectscript
 Class MyApp.MCP.DatabaseService Extends %AI.MCP.Service
 {
-    /// Can list tools, toolsets, or tool refs
-    /// Best practice: Use ToolSets to apply policies
+    /// SPECIFICATION lists tools, toolsets, or tool refs (comma-separated)
     Parameter SPECIFICATION As STRING = "MyApp.ToolSet.Database";
-
-    /// Or mix multiple sources:
-    /// Parameter SPECIFICATION As STRING = "MyApp.Tools.Calculator,MyApp.ToolSet.Database,%AI.Tools.SQL";
 }
 ```
-
-> **Note**: For detailed examples of creating tools and toolsets, see the [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md).
 
 ### Configure Web Application
 
-1. Open System Management Portal
-2. Navigate to: System Administration > Security > Applications > Web Applications
-3. Create new application:
-   - Name: `/mcp/database`
-   - Namespace: USER
-   - Dispatch Class: `MyApp.MCP.DatabaseService`
-   - Enabled: Yes
-   - CSP/ZEN: Yes
-   - Authentication: Password
+1. Open IRIS Management Portal
+2. Navigate to: **System Administration → Security → Applications → Web Applications**
+3. Create a new application:
+   - **Name:** `/mcp/database`
+   - **Namespace:** USER
+   - **Dispatch Class:** `MyApp.MCP.DatabaseService`
+   - **Enabled:** Yes
+   - **CSP/ZEN:** Yes
+   - **Authentication:** Password (or Unauthenticated for dev/internal use)
 
-## Running iris-mcp-server
+---
 
-### Command-Line Usage
+## Service Discovery
 
-```bash
-# Basic usage
-iris-mcp-server run \
-  --iris-host localhost \
-  --iris-port 52773 \
-  --iris-namespace USER \
-  --iris-mcp-path /mcp/database \
-  --transport stdio
+### How Discovery Works
 
-# With connection pooling
-iris-mcp-server run \
-  --config config.toml \
-  --pool-min 10 \
-  --pool-max 50
+At startup iris-mcp-server fetches the tool list from each configured endpoint:
 
-# With auto-discovery
-iris-mcp-server run \
-  --config config.toml \
-  --auto-discover \
-  --discover-interval 60
+1. Sends `GET {endpoint}/v1/services` to IRIS (conditional GET with `If-None-Match` ETag)
+2. IRIS MCP Service returns a JSON tool catalog
+3. iris-mcp-server registers the tools, computing a per-tool SHA-256 hash
+4. A service-level ETag is stored for future conditional GETs
 
-# With smart discovery (RAG)
-iris-mcp-server run \
-  --config config.toml \
-  --enable-smart-discovery \
-  --embedding-model "sentence-transformers/all-MiniLM-L6-v2"
-```
+### Tool Refresh
 
-### Feature Flags
-
-iris-mcp-server is built with feature flags for optional functionality:
-
-```bash
-# Build with all features
-cargo build --release --all-features
-
-# Build with specific features
-cargo build --release --features "service-dynamic,smart-discovery,telemetry"
-
-# Build minimal (static tools only)
-cargo build --release --no-default-features
-```
-
-Available features:
-- `service-dynamic`: Dynamic IRIS service discovery via wgproto + STP
-- `smart-discovery`: RAG-based tool discovery (requires fastembed)
-- `telemetry`: OpenTelemetry tracing and metrics
-- `vault`: HashiCorp Vault credential management
-
-## Transport Modes
-
-### stdio (for Claude Desktop)
-
-```bash
-iris-mcp-server run \
-  --config config.toml \
-  --transport stdio
-```
-
-Claude Desktop config:
-```json
-{
-  "mcpServers": {
-    "iris": {
-      "command": "iris-mcp-server",
-      "args": ["run", "--config", "/path/to/config.toml", "--transport", "stdio"]
-    }
-  }
-}
-```
-
-### HTTP (for Remote MCP)
-
-When Remote MCP is enabled, iris-mcp-server exposes HTTP endpoints:
-
-```bash
-iris-mcp-server run \
-  --config config.toml \
-  --transport http://0.0.0.0:8080
-```
-
-Connect from remote client:
-```bash
-curl http://localhost:8080/mcp/v1/tools
-```
-
-This creates a bridge: Remote HTTP client → iris-mcp-server (HTTP) → IRIS (wgproto)
-
-### SSE (Server-Sent Events)
-
-For streaming responses:
-
-```bash
-iris-mcp-server run \
-  --config config.toml \
-  --transport sse://0.0.0.0:8080
-```
-
-## Security & Credentials
-
-### Basic Authentication (Environment Variables)
-
-```bash
-export IRIS_USERNAME="CSPSystem"
-export IRIS_PASSWORD="SYS"
-
-iris-mcp-server run --config config.toml
-```
-
-### Configuration File
+The background tool-refresh loop re-fetches tool lists every `tool_refresh_interval_secs` (default: 300 seconds). A 304 Not Modified response means no change and nothing is re-registered. On a 200 response, per-tool hashes are compared; only changed tools trigger an MCP `tools/list_changed` notification to connected clients.
 
 ```toml
 [iris]
-username = "CSPSystem"
-password = "SYS"
+tool_refresh_interval_secs = 60   # more frequent polling during development
 ```
 
-> **Warning**: Never commit credentials to version control!
+### Endpoint Auto-Discovery
 
-### HashiCorp Vault Integration
-
-Enable Vault for credential management:
+If `mcp_endpoints` is omitted from `[iris]`, iris-mcp-server queries the IRIS CSP application registry for all apps matching `/mcp*` and connects to each one automatically.
 
 ```toml
 [iris]
 host = "localhost"
 port = 52773
-namespace = "USER"
-mcp_path = "/mcp/database"
-
-# Vault configuration
-vault_enabled = true
-vault_addr = "http://localhost:8200"
-vault_token = "${VAULT_TOKEN}"
-vault_secret_path = "secret/data/iris/mcp"
+# mcp_endpoints omitted → auto-discover /mcp* apps
 ```
 
-Setup Vault:
+### Local IRIS Instance Auto-Discovery
 
-```bash
-# Enable KV secrets engine
-vault secrets enable -path=secret kv-v2
+When `--auto-discover-interval=N` is set, the server polls for locally-running IRIS instances and connects to each one it finds. When an instance disappears its tools are deregistered. Use `[iris]` credentials as the connection template.
 
-# Store IRIS credentials
-vault kv put secret/iris/mcp \
-  username=CSPSystem \
-  password=SYS
+### Tool Namespacing
 
-# Get token for iris-mcp-server
-export VAULT_TOKEN=$(vault token create -field=token)
+When multiple MCP endpoints are connected, tools from each service are prefixed with a **service ID** derived from the endpoint path. This prevents name collisions and tells the LLM which service a tool belongs to.
 
-# Run with Vault
-iris-mcp-server run --config config.toml
-```
+The service ID is the endpoint path with the leading slash stripped and remaining slashes replaced with underscores:
 
-Vault will provide:
-- `username`
-- `password`
+| Endpoint path | Service ID prefix | Example tool name |
+|---------------|-------------------|-------------------|
+| `/mcp` | `mcp` | `mcp_ExecuteQuery` |
+| `/mcp/database` | `mcp_database` | `mcp_database_ExecuteQuery` |
+| `/mcp/myapp` | `mcp_myapp` | `mcp_myapp_GetCustomer` |
 
-### TLS/SSL Configuration
+When there is only one endpoint, tools still carry the prefix. Keep this in mind when writing system prompts or instructions that refer to tools by name.
 
-For HTTPS IRIS connections:
+### Reconnection
+
+If the connection to IRIS is lost (IRIS restart, network interruption), iris-mcp-server automatically attempts to reconnect in the background using the interval configured by `reconnect_interval_secs` (default: 30 seconds). You do not need to restart iris-mcp-server — tools remain registered and reconnection is retried silently until it succeeds.
 
 ```toml
 [iris]
-host = "iris.example.com"
-port = 443
-use_tls = true
-verify_cert = true  # Set to false for self-signed certs
+reconnect_interval_secs = 10   # retry faster during development
 ```
 
-## Service Discovery
+---
 
-### Manual Discovery
+## The iris_status Diagnostic Tool
 
-By default, iris-mcp-server discovers tools once at startup:
+When iris-mcp-server encounters connection errors or startup failures, it exposes a special MCP tool called **`iris_status`** that the LLM can call to report the problem. The tool only appears in the tool list when there are active errors — in a healthy, fully-connected session it is absent, keeping the tool list clean.
 
-```bash
-iris-mcp-server run --config config.toml
+When the LLM sees `iris_status` it means something went wrong. Calling it returns a structured report of all current errors — for example:
+
+```
+iris_status result:
+- mcp_database: connection failed — refused at localhost:52773
+- mcp_analytics: authentication error — 403 Forbidden (check [iris.user_auth])
 ```
 
-Discovery happens via wgproto:
-1. iris-mcp-server calls `GET /v1/services` via wgproto
-2. IRIS MCP Service returns tool catalog
-3. iris-mcp-server caches the catalog
+This allows the LLM to proactively tell the user what is broken rather than silently failing when tools are called.
 
-### Auto-Discovery
+**To disable the tool entirely** (e.g. for a production environment where you don't want internal state visible to the LLM):
 
-Enable periodic re-discovery to detect new tools:
+```powershell
+iris-mcp-server.exe --config=config.toml run --status-tool=false
+```
+
+---
+
+## Smart Discovery (RAG)
+
+Smart discovery uses a local embedding model (fastembed / `AllMiniLML6V2`) to perform semantic search across all registered tool descriptions. When an LLM asks for tools matching a natural-language query, relevant tools are ranked by cosine similarity rather than exact name matching.
+
+> The embedding model (~25 MB) is downloaded from HuggingFace on first use.
+
+Enable in `config.toml`:
 
 ```toml
-[discovery]
-auto_discover = true
-interval_seconds = 60  # Re-discover every 60 seconds
-cache_ttl = 300        # Cache results for 5 minutes
-```
-
-This is useful when:
-- Tools are added/removed dynamically
-- Multiple services share the same MCP server
-- Development environments with frequent changes
-
-### Smart Discovery (RAG)
-
-Enable RAG-based semantic tool discovery:
-
-```bash
-# Build with smart-discovery feature
-cargo build --release --features smart-discovery
-
-# Run with smart discovery
-iris-mcp-server run \
-  --config config.toml \
-  --enable-smart-discovery \
-  --embedding-model "sentence-transformers/all-MiniLM-L6-v2"
-```
-
-Configuration:
-
-```toml
-[discovery]
+[features]
 smart_discovery = true
-embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
-embedding_cache_size = 10000
-similarity_threshold = 0.7
 ```
 
-Smart discovery uses semantic search to find relevant tools based on natural language queries instead of exact name matching.
+Smart discovery is indexed automatically as tools are registered. No additional CLI flags are required.
+
+---
 
 ## Monitoring & Telemetry
 
 ### Logging
 
-Configure log level:
+Set the log level via CLI (overrides config):
 
-```bash
-export RUST_LOG=info  # debug, info, warn, error
-iris-mcp-server run --config config.toml
+```powershell
+iris-mcp-server.exe --log-level=debug --log-output=stderr ...
 ```
 
-Or in config file:
+Or in `config.toml`:
 
 ```toml
-[server]
-log_level = "info"
+[logging]
+level  = "debug"     # error | warn | info | debug | trace
+output = "file"
+file   = "C:\\logs\\iris-mcp.log"
 ```
 
-### OpenTelemetry (with telemetry feature)
+For file output, `file` is required. For stderr output, `file` is ignored.
 
-Enable distributed tracing:
+You can also set `RUST_LOG=debug` (or any `env_logger`-compatible filter) to override the log level from the environment.
+
+### OpenTelemetry Tracing
+
+Built with the `telemetry` feature (included in `gateway`). Traces are exported via OTLP (gRPC).
+
+Enable in config:
 
 ```toml
-[telemetry]
-enabled = true
-service_name = "iris-mcp-server"
-jaeger_endpoint = "http://localhost:14268/api/traces"
+[features]
+telemetry = true
 ```
 
-Run Jaeger for trace visualization:
+Set the OTLP endpoint via the standard environment variable:
 
 ```bash
-# Start Jaeger all-in-one
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+```
+
+Run Jaeger for local trace visualization:
+
+```bash
 docker run -d --name jaeger \
   -p 16686:16686 \
-  -p 14268:14268 \
+  -p 4317:4317 \
   jaegertracing/all-in-one:latest
-
 # View traces at http://localhost:16686
 ```
 
-### Prometheus Metrics
+### Verifying Tool Discovery
 
-Export metrics for Prometheus scraping:
+The easiest way to confirm iris-mcp-server is discovering tools is to check the logs at startup:
 
-```toml
-[telemetry]
-metrics_enabled = true
-metrics_port = 9090
+```powershell
+iris-mcp-server.exe --log-level=debug --config=config.toml run
 ```
 
-Prometheus config:
+Look for lines like `registered N tools from /mcp/database`. If no tools appear, enable debug logging and check for discovery errors.
 
-```yaml
-scrape_configs:
-  - job_name: 'iris-mcp-server'
-    static_configs:
-      - targets: ['localhost:9090']
-```
-
-Available metrics:
-- `iris_mcp_tool_calls_total` - Total tool executions
-- `iris_mcp_tool_duration_seconds` - Tool execution latency
-- `iris_mcp_connection_pool_active` - Active wgproto connections
-- `iris_mcp_discovery_cache_hits` - Discovery cache hit rate
-
-### Health Checks
-
-Check IRIS backend health via wgproto:
+If you have access to an IRIS web gateway (not the super-server port), you can also call the IRIS health endpoint directly:
 
 ```bash
-# iris-mcp-server queries this endpoint via wgproto
-# You can test it directly via HTTP to IRIS:
-curl http://localhost:52773/mcp/database/v1/health
-
-# Example response:
-{
-  "status": "healthy",
-  "timestamp": "2026-02-23T10:30:00.000Z",
-  "server": "IRIS MCP Gateway",
-  "service": "MyApp.MCP.DatabaseService",
-  "specification": "MyApp.ToolSet.Database",
-  "version": "2.0.0",
-  "toolcount": 15
-}
+curl http://<iris-webgateway-host>/mcp/database/v1/health
 ```
+
+---
 
 ## Production Deployment
 
-### Docker
+### Container
 
-Create `Dockerfile`:
-
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /build
-COPY . .
-RUN cargo build --release --features service-dynamic,telemetry
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /build/target/release/iris-mcp-server /usr/local/bin/
-COPY config.toml /etc/iris-mcp/config.toml
-
-ENTRYPOINT ["iris-mcp-server"]
-CMD ["run", "--config", "/etc/iris-mcp/config.toml"]
-```
-
-Build and run:
+A pre-built container image is available. Run it with your config file mounted and credentials supplied via environment:
 
 ```bash
-docker build -t iris-mcp-server:latest .
-
 docker run -d \
   --name iris-mcp \
+  -e IRIS_USER=CSPSystem \
+  -e IRIS_PASS=SYS \
   -e VAULT_TOKEN=${VAULT_TOKEN} \
-  -p 8080:8080 \
-  iris-mcp-server:latest
+  -v /path/to/config.toml:/etc/iris-mcp/config.toml:ro \
+  -p 8000:8000 \
+  intersystems/iris-mcp-server:latest
 ```
 
 ### Kubernetes
-
-Create deployment:
 
 ```yaml
 apiVersion: apps/v1
@@ -708,33 +875,30 @@ spec:
       containers:
       - name: iris-mcp-server
         image: iris-mcp-server:latest
+        args: ["--config", "/etc/iris-mcp/config.toml", "run"]
         ports:
-        - containerPort: 8080
+        - containerPort: 8000
         env:
         - name: VAULT_TOKEN
           valueFrom:
             secretKeyRef:
-              name: vault-token
+              name: vault-credentials
               key: token
+        volumeMounts:
+        - name: config
+          mountPath: /etc/iris-mcp
+          readOnly: true
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "250m"
+            memory: "128Mi"
+            cpu: "100m"
           limits:
             memory: "512Mi"
             cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: iris-mcp-config
 ---
 apiVersion: v1
 kind: Service
@@ -744,221 +908,116 @@ spec:
   selector:
     app: iris-mcp-server
   ports:
-  - port: 8080
-    targetPort: 8080
+  - port: 8000
+    targetPort: 8000
   type: LoadBalancer
 ```
 
-### Helm Chart
+### Connection Pool Sizing
 
-Install with Helm:
+iris-mcp-server maintains two pool types:
 
-```bash
-helm install iris-mcp ./helm/iris-mcp-server \
-  --set iris.host=iris.example.com \
-  --set iris.namespace=PRODUCTION \
-  --set vault.enabled=true \
-  --set vault.addr=http://vault.example.com:8200
-```
-
-### Connection Pooling Best Practices
-
-Configure pool sizes based on workload:
+**`[iris] pool_size`** — connections per IRIS instance. Each connection can carry multiple multiplexed requests.
 
 ```toml
-[pool]
-# Development
-min_connections = 2
-max_connections = 10
-
-# Production (light load)
-min_connections = 5
-max_connections = 20
-
-# Production (heavy load)
-min_connections = 10
-max_connections = 50
-
-# Connection timeout in seconds
-connection_timeout = 30
+[iris]
+pool_size = 5   # development
+# pool_size = 20  # high-concurrency production
 ```
 
-Guidelines:
-- **min_connections**: Always-open wgproto connections for low latency
-- **max_connections**: Scale up under load, but avoid overwhelming IRIS
-- **Rule of thumb**: 1 connection per ~10 concurrent users
+**`[connection_pools]`** — MCP-side worker limits:
+
+```toml
+[connection_pools]
+stdio.min      = 2
+stdio.max      = 5
+remote_mcp.min = 5
+remote_mcp.max = 50    # increase for high client concurrency
+```
+
+Rule of thumb: each concurrent tool call in flight uses one connection from the pool, so `pool_size` should be at least as large as the number of tool calls you expect to run simultaneously.
+
+---
 
 ## Troubleshooting
 
-### Connection Issues
+### Connection Failures
 
-**Problem**: `Failed to connect to IRIS via wgproto`
+**Problem:** `Failed to connect` / `ConnectionClosed`
 
-**Solutions**:
-1. Verify IRIS web application exists and is enabled
-2. Check web application Dispatch Class is correct
-3. Verify IRIS CSP server is running
-4. Check firewall allows HTTP connections to IRIS
-5. Check IRIS logs: `^DMC` global for debug info
+1. Verify the IRIS super-server is running on the configured port (default 52773)
+2. Verify the CSP web application exists and is enabled
+3. Check the Dispatch Class name is correct and the class is compiled in IRIS
+4. Confirm the `[iris]` credentials (`username`/`password`) are correct — these are gateway-level credentials, not IRIS application user credentials
+5. Check firewall rules allow TCP to IRIS port 52773
 
-```objectscript
-// View IRIS logs
-USER> zwrite ^DMC
+### Connected but No Tools Appear
 
-// Clear logs
-USER> kill ^DMC
-```
+**Problem:** iris-mcp-server connects successfully but the LLM sees no tools (or only `iris_status`)
+
+The server's `initialize` response already instructs the LLM: *"If IRIS tools appear to be missing or something seems wrong, call iris_status."* So the LLM should proactively call `iris_status` and surface any errors — check its output first.
+
+If `iris_status` reports a clean connection but zero tools, the problem is on the IRIS side:
+
+1. Verify the `SPECIFICATION` parameter on the MCP Service class is non-empty and references the correct class names
+2. Confirm all listed tool/toolset classes are compiled in the correct IRIS namespace
+3. Confirm the CSP web application's **Namespace** matches where the classes are compiled
+4. Run iris-mcp-server with `--log-level=debug` and look for the tool count logged during discovery — if it shows 0 tools, the issue is on the IRIS side (empty `SPECIFICATION`, uncompiled classes, or wrong namespace)
 
 ### Tool Not Found
 
-**Problem**: `Tool 'ExecuteQuery' not found`
+**Problem:** Tool appears in discovery but call fails, or tool not listed
 
-**Solutions**:
-1. Check SPECIFICATION parameter includes the tool/toolset
-2. Verify tool class exists and is compiled
-3. Ensure tool method is public (not Private/Internal)
-4. Check tool name matches exactly (case-sensitive)
-5. Test discovery manually via HTTP to IRIS:
+1. Check the `SPECIFICATION` parameter on the MCP Service class includes the tool/toolset
+2. Ensure the method is public (not marked `Private` or `Internal`)
+3. Tool names are case-sensitive — check the exact names logged during discovery with `--log-level=debug`
+
+### Authentication Failures (403)
+
+**Problem:** `Tool call error: 403 Forbidden`
+
+IRIS is reachable (Layer 1 OK) but the MCP Server endpoint is rejecting the request (Layer 2 failing):
+
+1. Verify `[iris.user_auth]` is configured if the MCP Server endpoint requires authentication
+2. For HTTP Basic: confirm the username/password are valid IRIS credentials with access to the endpoint
+3. For OAuth passthrough: confirm the client is sending a valid `Authorization` header
+4. Check the MCP Server endpoint's authentication settings in the Management Portal
+
+### Secret Resolution Failures
+
+**Problem:** Server exits at startup with a secret error
+
+- `env:VAR` — check the environment variable is set before starting the process
+- `vault:path/field` — verify `vault_addr` is reachable, `vault_token` is valid, the path exists, and the field name matches exactly
+- Check Vault token permissions: `vault token lookup`
+- Vault KV2 path format: the reference `vault:iris/gateway/password` maps to Vault path `secret/data/iris/gateway` → field `password`
+
+### Debug Logging
+
+Enable verbose logging to see detailed protocol activity:
+
+```powershell
+iris-mcp-server.exe --log-level=debug --log-output=stderr --config=config.toml run
+```
+
+Or via environment:
 
 ```bash
-curl http://localhost:52773/mcp/database/v1/services
+RUST_LOG=debug iris-mcp-server --config=config.toml run
 ```
 
-### Authentication Failures
+Debug output includes:
+- Connection events (connect, disconnect, reconnect)
+- Tool discovery requests and ETag comparisons
+- STP request/response JSON
+- Smart discovery indexing
 
-**Problem**: `401 Unauthorized`
-
-**Solutions**:
-1. Verify username/password are correct
-2. Check web application authentication settings
-3. Ensure user has appropriate roles/permissions
-4. For Vault: verify `VAULT_TOKEN` is set and valid
-
-### Performance Issues
-
-**Problem**: Slow tool execution
-
-**Solutions**:
-1. Increase connection pool size:
-   ```toml
-   [pool]
-   max_connections = 50
-   ```
-
-2. Enable discovery caching:
-   ```toml
-   [discovery]
-   cache_ttl = 600
-   ```
-
-3. Monitor connection pool metrics:
-   ```bash
-   curl http://localhost:9090/metrics | grep pool
-   ```
-
-4. Check IRIS system performance (CPU, memory, locks)
-
-### Debug Mode
-
-Enable verbose logging:
-
-```bash
-export RUST_LOG=debug
-export IRIS_DEBUG=1
-
-iris-mcp-server run --config config.toml
-```
-
-This will show:
-- Detailed wgproto protocol messages
-- Tool discovery results
-- Connection pool activity
-- Policy enforcement decisions
-
-### Testing IRIS Endpoints
-
-Test IRIS MCP Service endpoints directly via HTTP:
-
-```bash
-# Health check
-curl http://localhost:52773/mcp/database/v1/health
-
-# List services (tool discovery)
-curl http://localhost:52773/mcp/database/v1/services
-```
-
-> **Note**: These are REST endpoints. The STP protocol endpoint (`/v1/ws`) is accessed by iris-mcp-server using wgproto, not directly accessible via standard HTTP tools.
-
-## Advanced Topics
-
-### Multiple IRIS Instances
-
-Connect to multiple IRIS services:
-
-```toml
-[[services]]
-name = "production-db"
-host = "iris-prod.example.com"
-port = 52773
-namespace = "PRODUCTION"
-mcp_path = "/mcp/database"
-
-[[services]]
-name = "analytics"
-host = "iris-analytics.example.com"
-port = 52773
-namespace = "ANALYTICS"
-mcp_path = "/mcp/analytics"
-```
-
-Each service gets its own wgproto connection pool.
-
-### Custom Policy Enforcement
-
-IRIS policies are enforced server-side through the ToolManager. See [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md) for details on:
-- Authorization policies
-- Audit policies
-- Discovery policies
-
-### Load Balancing
-
-For high availability, deploy multiple iris-mcp-server instances behind a load balancer:
-
-```
-┌──────────────┐
-│ Load Balancer│
-└──────┬───────┘
-       │
-       ├─────► iris-mcp-server (instance 1) ──(wgproto)──► IRIS
-       ├─────► iris-mcp-server (instance 2) ──(wgproto)──► IRIS
-       └─────► iris-mcp-server (instance 3) ──(wgproto)──► IRIS
-```
-
-Each instance maintains its own wgproto connection pool to IRIS.
-
-### Understanding wgproto
-
-**wgproto** (Web Gateway Protocol) is the low-level protocol used by:
-- InterSystems Web Gateway (IIS/Apache modules)
-- iris-mcp-server (direct implementation)
-
-Benefits:
-- **No external web server needed**: iris-mcp-server communicates directly with IRIS
-- **Efficient multiplexing**: Multiple logical requests over pooled connections
-- **Native IRIS support**: CSP sessions, authentication, WebSocket semantics
-- **High performance**: Binary protocol optimized for IRIS communication
+---
 
 ## Next Steps
 
-1. **Create your IRIS backend** - See [IRIS Backend Setup](#iris-backend-setup)
-2. **Configure iris-mcp-server** - Create a config.toml file
-3. **Test locally** - Use stdio transport with Claude Desktop
-4. **Add security** - Integrate Vault for credential management
-5. **Monitor** - Enable telemetry and metrics
-6. **Deploy** - Use Docker/Kubernetes for production
-
-For more information:
-- [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md) - Creating tools and toolsets
-- [IRIS MCP README](../iris-llm/cls/AI/MCP/README.md) - Technical details of IRIS backend
-- [STP Protocol](../iris-llm/STP.md) - WebSocket protocol specification
-- [wgproto](../wgproto/README.md) - Web Gateway Protocol implementation
+1. **Create your IRIS backend** — See [IRIS Backend Setup](#iris-backend-setup) and [ObjectScript USER_GUIDE](objectscript/USER_GUIDE.md)
+2. **Write a config.toml** — Use the [Full TOML Reference](#full-toml-reference) as a template
+3. **Test locally** — Use stdio transport with Claude Desktop
+4. **Secure credentials** — Use `env:` references or configure Vault
+5. **Deploy** — Docker or Kubernetes using the examples above
