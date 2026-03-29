@@ -28,7 +28,6 @@ This directory contains sample MCP Service classes for testing and demonstrating
 ### 1. Load the Classes
 
 ```objectscript
-// In IRIS Terminal
 USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "ck", .errors, 1)
 ```
 
@@ -41,9 +40,9 @@ USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "c
    - **Name**: `/mcp/testing`
    - **Namespace**: `USER` (or your namespace)
    - **Dispatch Class**: `Sample.MCP.Service.Testing`
-   - **Enabled**: ✓ Yes
-   - **CSP/ZEN**: ✓ Yes
-   - **Authentication**: Password (or Delegated)
+   - **Enabled**: Yes
+   - **CSP/ZEN**: Yes
+   - **Authentication**: Password (or Unauthenticated for dev)
 5. Save
 
 ### 3. Create Web Application for Calculator Service (Optional)
@@ -52,57 +51,82 @@ Repeat the above steps with:
 - **Name**: `/mcp/calculator`
 - **Dispatch Class**: `Sample.MCP.Service.Calculator`
 
-### 4. Verify Setup
-
-Test the REST endpoints:
-
-```bash
-# Health check
-curl http://localhost:52773/mcp/testing/v1/health
-
-# List available tools
-curl http://localhost:52773/mcp/testing/v1/services
-```
-
-Expected response from `/v1/services` should include tools like:
-- `Add`
-- `Multiply`
-- `Echo`
-- `GetTestData`
-- `Fail`
-- `Slow`
-
 ## Using with iris-mcp-server
 
-### Basic Configuration
+### Authentication Overview
 
-Create `test-config.toml`:
+iris-mcp-server has two independent authentication layers:
+
+| Layer | What it secures | Where configured |
+|-------|-----------------|-----------------|
+| **wgproto transport** | iris-mcp-server to IRIS web gateway | `[[iris]] server.username` / `server.password` |
+| **CSP application** | Per-request user identity for each endpoint | `[[iris]] endpoints[].username` / `password` / `bearer` |
+
+The transport credential (`CSPSystem`) opens the connection. If the CSP web application requires authentication, the endpoint credential supplies the user identity for each request.
+
+### Basic Configuration (Unauthenticated endpoint)
+
+If the web application is configured with **Authentication: None** (typical for dev), only the transport credential is needed:
 
 ```toml
-[iris]
-host = "localhost"
-port = 52773
-namespace = "USER"
-username = "CSPSystem"
-password = "SYS"
-mcp_path = "/mcp/testing"
-
-[pool]
-min_connections = 2
-max_connections = 10
-
-[server]
+[mcp]
 transport = "stdio"
-log_level = "debug"
+
+[[iris]]
+name   = "local"
+server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+pool   = { min = 2, max = 10 }
+endpoints = [
+  { path = "/mcp/testing" },
+]
+
+[logging]
+level  = "debug"
+output = "file"
+file   = "iris-mcp.log"
 ```
+
+### Configuration with Authenticated Endpoint
+
+If the web application requires authentication (Password or Delegated), add credentials to the endpoint entry:
+
+```toml
+[mcp]
+transport = "stdio"
+
+[[iris]]
+name   = "local"
+server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+pool   = { min = 2, max = 10 }
+endpoints = [
+  { path = "/mcp/testing", username = "_SYSTEM", password = "SYS" },
+]
+
+[logging]
+level  = "debug"
+output = "file"
+file   = "iris-mcp.log"
+```
+
+For a Bearer token instead of HTTP Basic:
+
+```toml
+endpoints = [
+  { path = "/mcp/testing", bearer = "mytoken" },
+]
+```
+
+For Remote MCP (HTTP/SSE) with OAuth, the `Authorization` header from each incoming MCP client session is forwarded to IRIS automatically — no endpoint credentials needed.
 
 ### Run iris-mcp-server
 
 ```bash
-iris-mcp-server run --config test-config.toml
+iris-mcp-server --config test-config.toml run
 ```
 
 ### Test with Python MCP Client
+
+Tools are namespaced by endpoint path: `/mcp/testing` → prefix `mcp_testing`.
 
 ```python
 import asyncio
@@ -112,7 +136,7 @@ from mcp.client.stdio import stdio_client
 async def test_iris_mcp():
     server_params = StdioServerParameters(
         command="iris-mcp-server",
-        args=["run", "--config", "test-config.toml"],
+        args=["--config", "test-config.toml", "run"],
     )
 
     async with stdio_client(server_params) as (read, write):
@@ -123,12 +147,12 @@ async def test_iris_mcp():
             tools = await session.list_tools()
             print(f"Available tools: {[t.name for t in tools.tools]}")
 
-            # Test Add
-            result = await session.call_tool("Add", {"a": 5, "b": 3})
+            # Test Add (note the mcp_testing_ prefix)
+            result = await session.call_tool("mcp_testing_Add", {"a": 5, "b": 3})
             print(f"Add(5, 3) = {result}")
 
             # Test Echo
-            result = await session.call_tool("Echo", {"text": "Hello, MCP!"})
+            result = await session.call_tool("mcp_testing_Echo", {"text": "Hello, MCP!"})
             print(f"Echo result: {result}")
 
 asyncio.run(test_iris_mcp())
@@ -162,7 +186,7 @@ Subtracts b from a.
 Multiplies two numbers.
 
 #### Divide(a, b)
-Divides a by b. Returns error if b is zero.
+Divides a by b. Returns an error object if b is zero.
 
 **Error example**:
 ```json
@@ -175,73 +199,29 @@ Divides a by b. Returns error if b is zero.
 ### Test Utilities (Sample.AI.Tools.TestUtilities)
 
 #### Echo(text)
-Returns the input text unchanged with metadata.
-
-**Returns**:
-```json
-{
-  "input": "Hello",
-  "length": 5,
-  "timestamp": "2026-02-23T10:30:00.000Z"
-}
-```
+Returns the input text with length and timestamp metadata.
 
 #### GetTestData()
-Returns structured data with various types for serialization testing.
-
-**Returns**:
-```json
-{
-  "string": "Hello, World!",
-  "integer": 42,
-  "float": 3.14159,
-  "boolean": true,
-  "null": null,
-  "array": [1, 2, 3, 4, 5],
-  "nested": {"key1": "value1", "key2": "value2"}
-}
-```
+Returns structured data with various JSON types for serialization testing.
 
 #### Fail(message)
-Always fails with the specified error message. Tests error handling.
+Always throws with the specified message. Tests error propagation.
 
 **Parameters**:
 - `message` (String): Error message (default: "Intentional test failure")
 
 #### Slow(milliseconds)
-Sleeps for specified milliseconds then returns. Tests timeout handling.
+Sleeps for the specified duration then returns timing info. Tests timeout handling.
 
 **Parameters**:
 - `milliseconds` (Integer): Sleep duration (default: 1000)
 
-**Returns**:
-```json
-{
-  "requested_ms": 1000,
-  "actual_ms": 1001,
-  "timestamp": "2026-02-23T10:30:00.000Z"
-}
-```
-
 #### GetTimestamp()
-Returns current timestamp in various formats.
-
-**Returns**:
-```json
-{
-  "horolog": "66477,38400",
-  "iso8601": "2026-02-23T10:30:00.000Z",
-  "unix_timestamp": "1708685400"
-}
-```
+Returns the current timestamp in HOROLOG, ISO 8601, and Unix formats.
 
 #### ValidateParams(required, optional)
-Tests parameter validation and optional parameters.
-
-**Parameters**:
-- `required` (String): Required parameter
-- `optional` (String): Optional parameter
+Echoes back parameters to test required vs optional argument handling.
 
 ## Automated Testing
 
-See the Python test suite in `iris-mcp-server/tests/` for automated integration tests using these services.
+See the Python test suite in `iris-mcp/tests/` for automated integration tests using these services.

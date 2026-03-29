@@ -51,9 +51,10 @@ ClassMethod DemoChat() As %Status
 {
     Write !, "=== Blocking Chat Demo ===", !
 
-    // Create agent - no need to pass provider!
-    // It will be created from PROVIDER/APIKEY parameters
+    // Create and initialise agent
     Set agent = ..%New()
+    Set sc = agent.%Init()
+    If $$$ISERR(sc) Return sc
 
     Write "Provider: ", agent.Provider.Name, !
     Write "Model: ", agent.Model, !

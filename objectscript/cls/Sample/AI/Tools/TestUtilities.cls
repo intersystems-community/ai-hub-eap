@@ -85,9 +85,9 @@ ClassMethod ValidateParams(
 {
     Set result = {
         "required": (required),
-        "optional": (optional),
-        "optional_provided": (optional '= "")
+        "optional": (optional)
     }
+    Do result.%Set("optional_provided", (optional '= ""), "boolean")
     Return result
 }
 

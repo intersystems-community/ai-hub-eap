@@ -599,7 +599,48 @@ Set myTools = ##class(MyApp.Tools).%New()
 Do agent.ToolManager.AddTool(myTools)
 ```
 
+**Built-in Rust Tools:**
+
+The framework ships several high-performance Rust tools ready to use without any extra code.
+
+`rust:filesystem` — file read/list operations (scoped to `base_dir`).
+
+`rust:web_search` — web search via Brave Search (default) or Bing.
+
+| URI | Provider | Required env var |
+|-----|----------|-----------------|
+| `rust:web_search` | Brave (default) | `BRAVE_SEARCH_API_KEY` |
+| `rust:web_search:brave` | Brave | `BRAVE_SEARCH_API_KEY` |
+| `rust:web_search:bing` | Bing | `BING_SEARCH_API_KEY` |
+
+Optional config keys (pass as a `%DynamicObject`):
+- `api_key` — overrides the environment variable.
+- `count` — number of results to return (1–10, default 5).
+
+```objectscript
+// Basic web search (reads BRAVE_SEARCH_API_KEY from environment)
+Do agent.ToolManager.AddTool("rust:web_search")
+
+// Bing with a result count limit
+Do agent.ToolManager.AddTool({"type":"rust:web_search:bing","config":{"count":3}})
+
+// Brave with explicit API key
+Do agent.ToolManager.AddTool({"type":"rust:web_search","config":{"api_key":"bsa-...","count":5}})
+```
+
+The tool exposes a single `web_search(query, count?)` function. It returns:
+```json
+{
+  "results": [
+    {"title": "Example", "url": "https://example.com", "description": "..."}
+  ],
+  "count": 5
+}
+```
+
 **Setting Policies:**
+
+:warning: advanced / experimental feature -- this capability may change significantly before GA release
 
 ```objectscript
 // Authorization policy
@@ -883,11 +924,18 @@ Control which tools from an included ToolSet are exposed:
 </Include>
 ```
 
-### MCP Server Integration
+### Using External MCP Servers
 
 :warning: In a forthcoming update, this capability will switch to use stored MCP configurations using the IRIS Config Store.
 
-Connect to external Model Context Protocol servers:
+A `<MCP>` element inside a ToolSet definition connects your agent to an
+external MCP server and makes its tools available alongside your own. The
+agent treats MCP tools exactly like any other tool — policy enforcement,
+filtering, and tool composition all apply normally.
+
+This section covers consuming external MCP servers from within a ToolSet.
+To expose your own IRIS tools as an MCP server (for use by Claude Desktop or
+other MCP clients), see [Exposing IRIS Tools via iris-mcp-server](MCP_Server_Guide.md).
 
 **Stdio MCP Server:**
 
@@ -900,35 +948,134 @@ Connect to external Model Context Protocol servers:
 </MCP>
 ```
 
-**Remote MCP Server (WebSocket):**
+**Remote MCP Server (HTTP/SSE):**
 
 ```xml
 <MCP Name="RemoteServer">
-    <Remote Url="ws://localhost:8080/mcp"/>
+    <Remote URL="http://localhost:8080/mcp"/>
 </MCP>
 ```
 
+**Remote MCP Server with authentication:**
+
+```xml
+<!-- Bearer token -->
+<MCP Name="SecureServer">
+    <Remote URL="https://mcp.example.com/mcp"
+            AuthType="bearer"
+            Token="@{env.MCP_TOKEN}"/>
+</MCP>
+
+<!-- HTTP Basic -->
+<MCP Name="BasicAuthServer">
+    <Remote URL="https://mcp.example.com/mcp"
+            AuthType="basic"
+            Username="_SYSTEM"
+            Password="@{env.MCP_PASSWORD}"/>
+</MCP>
+
+<!-- Arbitrary header (API key or custom scheme) -->
+<MCP Name="ApiKeyServer">
+    <Remote URL="https://mcp.example.com/mcp"
+            AuthType="header"
+            HeaderName="X-API-Key"
+            HeaderValue="@{env.MCP_API_KEY}"/>
+</MCP>
+```
+
+**Platform-specific Stdio entries:**
+
+When the same toolset is deployed on multiple operating systems, use the
+`Platform` attribute to select the correct executable per platform. The value
+is a regex matched against a platform descriptor string built at runtime with
+the form `"<os> <version> <arch>"`. Examples:
+
+| Platform | Descriptor string |
+|---|---|
+| Windows 11 x64 | `windows 10.0 x86_64` |
+| Ubuntu 24.04 x64 | `linux ubuntu 24.04 x86_64` |
+| macOS Sonoma ARM | `macos 14.5.0 aarch64` |
+| macOS Sonoma Intel | `macos 14.5.0 x86_64` |
+
+The first `<Stdio>` element whose `Platform` regex matches wins; an element
+with no `Platform` attribute is a catch-all fallback.
+
+```xml
+<MCP Name="MyServer">
+    <!-- Windows only (any version, any architecture) -->
+    <Stdio Platform="windows" Executable="my-mcp-server.cmd"/>
+    <!-- ARM64 (Apple Silicon or Linux ARM) -->
+    <Stdio Platform="aarch64" Executable="/usr/local/bin/my-mcp-server-arm64"/>
+    <!-- Everything else (Linux x64, macOS x64, ...) -->
+    <Stdio Executable="/usr/local/bin/my-mcp-server"/>
+</MCP>
+```
+
+More specific matches — pin to an OS version or require both OS and arch:
+
+```xml
+<MCP Name="MyServer">
+    <!-- Ubuntu 24.x only -->
+    <Stdio Platform="ubuntu 24\." Executable="/opt/bin/server-ubuntu24"/>
+    <!-- macOS on Apple Silicon -->
+    <Stdio Platform="macos.*aarch64" Executable="/opt/homebrew/bin/server"/>
+    <!-- Fallback -->
+    <Stdio Executable="/usr/local/bin/server"/>
+</MCP>
+```
+
+The `Platform` attribute works the same way on `<Remote>` elements, allowing
+different URLs or auth schemes per platform.
+
 ### Configuration Variables
 
-Use `@{KEY}` syntax to reference external configuration:
+:warning: In a forthcoming update, this capability will switch to use stored credentials using the IRIS Config Store.
+
+Use `@{prefix.key}` placeholders to pull values from external sources at runtime.
+Two prefixes are available by default:
+
+| Prefix | Source | Example |
+|---|---|---|
+| `env` | OS environment variable | `@{env.HOME}` |
+| `config` | `^%AI.Config` global | `@{config.BaseURL}` |
+| `wallet` | IRIS Secure Wallet | `@{wallet.AISecrets.OpenAIKey}` |
 
 ```xml
 <MCP Name="APIServer">
     <Stdio Executable="/opt/servers/api-mcp">
-        <Env Name="API_KEY" Value="@{EXTERNAL_API_KEY}"/>
-        <Env Name="DATABASE" Value="@{DB_CONNECTION}"/>
+        <Env Name="API_KEY" Value="@{wallet.AISecrets.ExternalAPIKey}"/>
+        <Env Name="DATABASE" Value="@{config.DB_CONNECTION}"/>
     </Stdio>
 </MCP>
 ```
 
-Store configuration values in globals:
+Register values at startup:
 
 ```objectscript
-Set ^%AI.Config("EXTERNAL_API_KEY") = "secret-key-123"
+// ^%AI.Config global (plain config values)
 Set ^%AI.Config("DB_CONNECTION") = "jdbc:IRIS://localhost:1972/USER"
+
+// IRIS Secure Wallet (secrets — requires %Admin_Wallet:USE or CUSTOM usage)
+Do ##class(%Wallet.KeyValue).Create("AISecrets.ExternalAPIKey", {
+    "Secret": "sk-proj-...",
+    "Usage": ["CUSTOM"]})
+
+// Register the wallet and config stores (call once at startup)
+Do ##class(%AI.Utils.SettingStore).RegisterDefaults()
 ```
 
-The framework expands these at runtime.
+Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax
+works everywhere in the framework: ToolSet config, provider settings, and
+agent system prompts.
+
+### Exposing IRIS Tools via iris-mcp-server
+
+iris-mcp-server is a standalone Rust process that bridges LLM clients (Claude
+Desktop, Python MCP clients, etc.) to IRIS tools over the wgproto protocol.
+It uses two independent authentication layers: one for the wgproto transport
+connection and one for per-request CSP application identity.
+
+See [`MCP_Server_Guide.md`](MCP_Server_Guide.md) for full configuration and authentication details.
 
 ## Building Agentic Applications
 

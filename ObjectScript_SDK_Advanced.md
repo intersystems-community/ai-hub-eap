@@ -219,7 +219,7 @@ Do agent.ToolManager.SetAuditPolicy(##class(MyApp.DatabaseAudit).%New())
 
 ### Policy Composition
 
-IRIS AI-Core supports **Policy Composition**, allowing policies to be defined at two levels:
+IRIS AI Hub supports **Policy Composition**, allowing policies to be defined at two levels:
 
 1. **Global Policies** - Attached to the ToolManager, apply to all tools
 2. **ToolSet Policies** - Defined in ToolSet XML, apply only to that ToolSet's tools

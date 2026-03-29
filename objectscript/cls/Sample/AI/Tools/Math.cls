@@ -49,6 +49,18 @@ ClassMethod Multiply(a As %Numeric, b As %Numeric) As %DynamicObject
     Return result
 }
 
+/// Sum all numbers in a list
+/// Returns the total of all values in the array
+ClassMethod Sum(values As %DynamicArray(ELEMENTTYPE="%Numeric")) As %Numeric
+{
+    Set total = 0
+    Set iter = values.%GetIterator()
+    While iter.%GetNext(.key, .value) {
+        Set total = total + value
+    }
+    Return total
+}
+
 /// Divide two numbers
 /// Returns a divided by b, or error if b is zero
 ClassMethod Divide(a As %Numeric, b As %Numeric) As %DynamicObject

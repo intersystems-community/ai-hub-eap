@@ -16,6 +16,7 @@ objectscript/
 │       │   ├── ToolSet/        # Sample toolset definitions
 │       │   ├── Policies/       # Sample policy implementations
 │       │   ├── Agent/          # Sample agent subclasses
+│       │   ├── Proglang/       # Programming language advisor example
 │       │   ├── Skill/          # Sample skill definitions
 │       │   └── Examples/       # Complete usage examples
 │       └── MCP/
@@ -86,6 +87,8 @@ Do ##class(Sample.AI.Examples.PolicyEnforcement).AuthorizationExample()
 
 ### RAG — Knowledge Bases (`Sample.AI.Examples.RAGUsage`)
 
+:warning: advanced / experimental feature -- this capability may change significantly before GA release
+
 Demonstrates retrieval-augmented generation: build a knowledge base, index documents,
 and let agents retrieve relevant context before answering.
 
@@ -118,6 +121,37 @@ XML-based toolset definition showing advanced features:
 ```objectscript
 Set toolset = ##class(Sample.AI.Examples.AdvancedToolSet).%New()
 Do agent.ToolManager.AddTool(toolset)
+```
+
+### Programming Language Advisor (`Sample.AI.Proglang`)
+
+:warning: advanced / experimental feature -- this capability may change significantly before GA release
+
+A self-contained multi-agent example with a persistent IRIS SQL data model.
+Demonstrates agent subclassing, tool design, and a realistic domain scenario.
+
+**Classes:**
+- `Sample.AI.Proglang.Tools` - Tools for querying programming language data
+- `Sample.AI.Proglang.Professor` - Agent that recommends languages
+- `Sample.AI.Proglang.Creator` - Agent that generates new language definitions
+- `Sample.AI.Proglang.Filter` - Agent that validates/filters language data
+- `Sample.AI.Proglang.Setup` - Populates the sample database
+
+**Usage:**
+```objectscript
+Do ##class(Sample.AI.Proglang.Setup).Run()        // populate sample data
+Set agent = ##class(Sample.AI.Proglang.Professor).%New()
+```
+
+### EverythingAgent (`Sample.AI.Agent.EverythingAgent`)
+
+Interactive agent that connects to the MCP `server-everything` reference server
+via stdio, demonstrating the full agent + MCP tool lifecycle.
+
+**Usage:**
+```objectscript
+Set sc = ##class(Sample.AI.Agent.EverythingAgent).Demo()      // interactive
+Set sc = ##class(Sample.AI.Agent.EverythingAgent).DemoFixed() // automated
 ```
 
 ## Sample Tools
@@ -219,3 +253,7 @@ Use the sample tools and policies as templates for your own:
 - Extend `%AI.Policy.Audit` for audit policies
 - Extend `%AI.ToolSet` for XML-based tool collections
 - Extend `%AI.RAG.Embedding` for custom embedding providers
+
+## Support
+
+For issues or questions, file an issue against this repository.
