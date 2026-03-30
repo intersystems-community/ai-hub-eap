@@ -65,6 +65,7 @@ The AI Hub offers dedicated experiences for specific audiences and use cases:
 If you're not looking to develop, but rather wire an AI such as Claude Desktop to your existing business logic or data, the AI Hub includes an MCP Server capability that allows you to publish your IRIS-native code and data as tools. Through a low-code interface, you can assemble a toolset that contains any combination of class methods, SQL or FHIR queries, and Business Services, and choose the security policies appropriate for your scenario.
 
 * [MCP Server guide](MCP_Server_Guide.md)
+* [MCP Server examples](MCP_Server_Examples.md)
 * [Declarative toolset definition](ObjectScript_SDK_Guide.md#building-toolsets)
 * [Toolset definition UI] (forthcoming)
 

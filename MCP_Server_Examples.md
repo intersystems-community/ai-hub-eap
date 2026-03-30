@@ -1,6 +1,6 @@
 # Sample MCP Services
 
-This directory contains sample MCP Service classes for testing and demonstrating iris-mcp-server integration with IRIS.
+The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes for testing and demonstrating iris-mcp-server integration with IRIS.
 
 ## MCP Services
 
@@ -31,19 +31,32 @@ This directory contains sample MCP Service classes for testing and demonstrating
 USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "ck", .errors, 1)
 ```
 
-### 2. Create Web Application for Testing Service
+### 2. Create MCP Server for Testing Service
 
 1. Open System Management Portal
-2. Navigate to: **System Administration > Security > Applications > Web Applications**
-3. Click **"Create New Web Application"**
+2. Navigate to: **System Administration > Security > Applications > MCP Servers**
+3. Click **"Create New MCP Server"**
 4. Configure:
    - **Name**: `/mcp/testing`
    - **Namespace**: `USER` (or your namespace)
    - **Dispatch Class**: `Sample.MCP.Service.Testing`
    - **Enabled**: Yes
-   - **CSP/ZEN**: Yes
    - **Authentication**: Password (or Unauthenticated for dev)
 5. Save
+
+Alternatively, you can create the MCP Server programmatically:
+
+```ObjectScript
+zn "%SYS"
+
+set props("NameSpace")="USER"
+set props("AutheEnabled")=64
+set props("Enabled")=1
+set props("DispatchClass")="Sample.MCP.Service.Calculator"
+set props("Type")=18
+
+do ##class(Security.Applications).Create("/mcp/calculator", .props)
+``` 
 
 ### 3. Create Web Application for Calculator Service (Optional)
 
@@ -51,7 +64,7 @@ Repeat the above steps with:
 - **Name**: `/mcp/calculator`
 - **Dispatch Class**: `Sample.MCP.Service.Calculator`
 
-## Using with iris-mcp-server
+## Configuring iris-mcp-server
 
 ### Authentication Overview
 
@@ -118,10 +131,24 @@ endpoints = [
 
 For Remote MCP (HTTP/SSE) with OAuth, the `Authorization` header from each incoming MCP client session is forwarded to IRIS automatically — no endpoint credentials needed.
 
-### Run iris-mcp-server
+## Run iris-mcp-server
+
+Use the following command to run iris-mcp-server with a configuration file.
 
 ```bash
 iris-mcp-server --config test-config.toml run
+```
+
+You can also supply most configuration elements through the command line:
+
+```bash
+iris-mcp-server --transport stdio run \ 
+    --iris-host localhost \ 
+    --iris-port 11401 \ 
+    --iris-user _SYSTEM \ 
+    --iris-password SYS \ 
+    --iris-endpoint /mcp/testing \ 
+    --iris-endpoint /mcp/calculator
 ```
 
 ### Test with Python MCP Client
