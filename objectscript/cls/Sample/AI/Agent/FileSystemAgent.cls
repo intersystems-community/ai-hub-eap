@@ -7,7 +7,8 @@ Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
 Parameter PROVIDER = "vertex";
 
 /// Provider configuration
-Parameter PROVIDERCONFIG = "{ ""project_id"": ""isc-cloud-llm-preview1"", ""region"": ""us-east5"", ""service_account_path"": ""C:\\Users\\davem\\Work\\AI\\vertex-sa.json"" }";
+/// service_account_path can use @{env.VERTEX_SA_PATH} or @{config.VertexSAPath} to avoid hardcoding
+Parameter PROVIDERCONFIG = "{ ""project_id"": ""my-gcp-project"", ""region"": ""us-east5"", ""service_account_path"": ""@{env.VERTEX_SA_PATH}"" }";
 
 /// Model to use (Claude 4.5)
 Parameter MODEL = "claude-sonnet-4-5@20250929";
@@ -93,6 +94,8 @@ ClassMethod DemoStream() As %Status
 
     // Create agent
     Set agent = ..%New()
+    Set sc = agent.%Init()
+    If $$$ISERR(sc) Return sc
 
     // Create chat session
     Set session = agent.CreateSession()
@@ -120,6 +123,8 @@ ClassMethod DemoMultiModal() As %Status
 
     // Create agent
     Set agent = ..%New()
+    Set sc = agent.%Init()
+    If $$$ISERR(sc) Return sc
 
     // Create chat session
     Set session = agent.CreateSession()

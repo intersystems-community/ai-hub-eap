@@ -135,15 +135,16 @@ Class MyApp.DatabaseAudit Extends %AI.Policy.Audit
         Set log = ##class(MyApp.ToolAuditLog).%New()
         Set log.Timestamp = $ZDATETIME($HOROLOG, 3)
         Set log.ToolName = call.name
-        Set log.Arguments = call.arguments
+        Set log.Arguments = call.arguments.%ToJSON()
         Set log.Success = $$$ISOK(status)
         Set log.DurationMs = duration
-        Set log.ResultSize = $LENGTH(result)
+        Set resultJson = result.%ToJSON()
+        Set log.ResultSize = $LENGTH(resultJson)
 
-        If success {
-            Set log.ResultPreview = $EXTRACT(result, 1, 200)
+        If $$$ISOK(status) {
+            Set log.ResultPreview = $EXTRACT(resultJson, 1, 200)
         } Else {
-            Set log.Error = result
+            Set log.Error = $SYSTEM.Status.GetErrorText(status)
         }
 
         Do log.%Save()
@@ -470,16 +471,13 @@ Set parentAgent.Model = "gpt-4"
 // Create specialized sub-agent for poetry
 Set poetAgent = ##class(%AI.SubAgent).Create(
     parentAgent,
-    "You are a creative poet. Write short, beautiful poems.",
-    "" // No extra config
+    "You are a creative poet. Write short, beautiful poems."
 )
 
 // Run the sub-agent
-Set response = poetAgent.Run("Write a haiku about the ocean")
+Set session = poetAgent.CreateSession()
+Set response = poetAgent.Run(session, "Write a haiku about the ocean")
 Write response.Content
-
-// Clean up
-Do poetAgent.%Delete()
 ```
 
 ### Example: Multi-Level Delegation

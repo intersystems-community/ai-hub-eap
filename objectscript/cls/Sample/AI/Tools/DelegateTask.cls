@@ -45,13 +45,11 @@ Method Execute(task As %String, specialistRole As %String = "", context As %Stri
         Write "[Delegation] Sub-agent created, executing task...", !
 
         // Run the sub-agent on the delegated task
-        Set response = subagent.Run(task)
+        Set session = subagent.CreateSession()
+        Set response = subagent.Run(session, task)
 
         Write "[Delegation] Sub-agent completed", !
         Write "[Delegation] Response length: ", $LENGTH(response.Content), " characters", !
-
-        // Clean up sub-agent
-        Do subagent.%Delete()
 
         Return response.Content
 

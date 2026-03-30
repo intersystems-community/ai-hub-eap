@@ -4,16 +4,6 @@ The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes
 
 ## MCP Services
 
-### Sample.MCP.Service.Testing
-
-**Purpose**: Automated testing of iris-mcp-server
-
-**Tools exposed**:
-- `Sample.AI.Tools.Math` - Add, Subtract, Multiply, Divide
-- `Sample.AI.Tools.TestUtilities` - Echo, GetTestData, Fail, Slow, GetTimestamp, ValidateParams
-
-**Use case**: Comprehensive automated test suite for iris-mcp-server
-
 ### Sample.MCP.Service.Calculator
 
 **Purpose**: Sample/demo MCP service with policies
@@ -31,15 +21,15 @@ The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes
 USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "ck", .errors, 1)
 ```
 
-### 2. Create MCP Server for Testing Service
+### 2. Create MCP Server for Calculator Service
 
 1. Open System Management Portal
 2. Navigate to: **System Administration > Security > Applications > MCP Servers**
 3. Click **"Create New MCP Server"**
 4. Configure:
-   - **Name**: `/mcp/testing`
+   - **Name**: `/mcp/calculator`
    - **Namespace**: `USER` (or your namespace)
-   - **Dispatch Class**: `Sample.MCP.Service.Testing`
+   - **Dispatch Class**: `Sample.MCP.Service.Calculator`
    - **Enabled**: Yes
    - **Authentication**: Password (or Unauthenticated for dev)
 5. Save
@@ -57,12 +47,6 @@ set props("Type")=18
 
 do ##class(Security.Applications).Create("/mcp/calculator", .props)
 ``` 
-
-### 3. Create Web Application for Calculator Service (Optional)
-
-Repeat the above steps with:
-- **Name**: `/mcp/calculator`
-- **Dispatch Class**: `Sample.MCP.Service.Calculator`
 
 ## Configuring iris-mcp-server
 
@@ -90,7 +74,7 @@ name   = "local"
 server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [
-  { path = "/mcp/testing" },
+  { path = "/mcp/calculator" },
 ]
 
 [logging]
@@ -112,7 +96,7 @@ name   = "local"
 server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [
-  { path = "/mcp/testing", username = "_SYSTEM", password = "SYS" },
+  { path = "/mcp/calculator", username = "_SYSTEM", password = "SYS" },
 ]
 
 [logging]
@@ -125,7 +109,7 @@ For a Bearer token instead of HTTP Basic:
 
 ```toml
 endpoints = [
-  { path = "/mcp/testing", bearer = "mytoken" },
+  { path = "/mcp/calculator", bearer = "mytoken" },
 ]
 ```
 
@@ -147,13 +131,12 @@ iris-mcp-server --transport stdio run \
     --iris-port 11401 \ 
     --iris-user _SYSTEM \ 
     --iris-password SYS \ 
-    --iris-endpoint /mcp/testing \ 
     --iris-endpoint /mcp/calculator
 ```
 
 ### Test with Python MCP Client
 
-Tools are namespaced by endpoint path: `/mcp/testing` → prefix `mcp_testing`.
+Tools are namespaced by endpoint path: `/mcp/calculator` → prefix `mcp_calculator`.
 
 ```python
 import asyncio
@@ -174,13 +157,9 @@ async def test_iris_mcp():
             tools = await session.list_tools()
             print(f"Available tools: {[t.name for t in tools.tools]}")
 
-            # Test Add (note the mcp_testing_ prefix)
-            result = await session.call_tool("mcp_testing_Add", {"a": 5, "b": 3})
+            # Test Add (note the mcp_calculcator prefix)
+            result = await session.call_tool("mcp_calculator_Add", {"a": 5, "b": 3})
             print(f"Add(5, 3) = {result}")
-
-            # Test Echo
-            result = await session.call_tool("mcp_testing_Echo", {"text": "Hello, MCP!"})
-            print(f"Echo result: {result}")
 
 asyncio.run(test_iris_mcp())
 ```

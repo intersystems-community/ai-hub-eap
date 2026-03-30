@@ -95,7 +95,7 @@ USER> Write $System.Util.GetEnviron("OPENAI_API_KEY")
 
 // Quick test
 USER> Set provider = ##class(%AI.Provider).Create("openai", {"api_key": "sk-..."})
-USER> Write provider.ProviderName()
+USER> Write provider.Name
 openai
 ```
 
@@ -340,11 +340,13 @@ You are a helpful AI assistant specialized in file system operations.
 }
 ```
 
-Then create the agent without passing a provider:
+Then create the agent — `%New()` allocates it, `%Init()` wires up the provider, loads
+`XData INSTRUCTIONS`, and registers the `TOOLSETS`:
 
 ```objectscript
 Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
-// Provider, model, system prompt, and toolsets are all configured!
+$$$ThrowOnError(agent.%Init())
+// Provider, model, system prompt, and toolsets are all configured
 ```
 
 **Supported Configuration Parameters:**
@@ -377,8 +379,9 @@ ClassMethod DemoChat() As %Status
 
     // Create agent - provider created from PROVIDER parameter
     Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+    $$$ThrowOnError(agent.%Init())
 
-    Write "Provider: ", agent.Provider.ProviderName(), !
+    Write "Provider: ", agent.Provider.Name, !
     Write "Model: ", agent.Model, !
 
     // Create chat session
@@ -414,6 +417,7 @@ ClassMethod DemoStream() As %Status
 
     // Create agent
     Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+    $$$ThrowOnError(agent.%Init())
 
     // Create chat session
     Set session = agent.CreateSession()
@@ -447,6 +451,7 @@ ClassMethod DemoMultiModal() As %Status
 
     // Create agent
     Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+    $$$ThrowOnError(agent.%Init())
 
     // Create chat session
     Set session = agent.CreateSession()
@@ -498,8 +503,8 @@ Method Chat(
 Method StreamChat(
     session As %AI.Agent.Session,
     input As %String,
-    callbackObj As %RegisteredObject,
-    callbackMethod As %String
+    callbackObj As %RegisteredObject = {$$$NULLOREF},
+    callbackMethod As %String = ""
 ) As %AI.LLM.Response
 
 // Multi-modal interaction
@@ -693,25 +698,18 @@ Class MyApp.SimpleTools Extends %AI.ToolSet
     XData Definition [ MimeType = application/xml ]
     {
         <ToolSet Name="SimpleTools">
-            <Description>Basic application tools</Description>
-
-            <Tool Name="GetTime" Method="GetTime">
-                <Description>Get the current server time.</Description>
-            </Tool>
-
-            <Tool Name="GetUserCount" Method="GetUserCount">
-                <Description>Get the total number of users.</Description>
-            </Tool>
+            <Tool Name="GetTime" Method="GetTime"/>
+            <Tool Name="GetUserCount" Method="GetUserCount"/>
         </ToolSet>
     }
 
-    /// Get current time
+    /// Get the current server time in ISO 8601 format.
     Method GetTime() As %String
     {
         Return $ZDATETIME($HOROLOG, 3)
     }
 
-    /// Count users
+    /// Get the total number of registered users.
     Method GetUserCount() As %Integer
     {
         &sql(SELECT COUNT(*) INTO :count FROM Security.Users)
@@ -736,7 +734,8 @@ Set response = agent.Chat(session, "What time is it?")
 
 ### Method 2: Tools with Parameters
 
-Tools can accept parameters with JSON Schema definitions.
+Tools accept typed parameters directly in the method signature. The framework generates
+the JSON Schema for the LLM from the compiled signature automatically.
 
 ```objectscript
 Class MyApp.Calculator Extends %AI.ToolSet
@@ -744,34 +743,27 @@ Class MyApp.Calculator Extends %AI.ToolSet
     XData Definition [ MimeType = application/xml ]
     {
         <ToolSet Name="Calculator">
-            <Tool Name="Add" Method="Add">
-                <Description>Add two numbers together.</Description>
-                <Parameters>
-                    <Parameter Name="a" Type="number" Required="true">
-                        <Description>First number</Description>
-                    </Parameter>
-                    <Parameter Name="b" Type="number" Required="true">
-                        <Description>Second number</Description>
-                    </Parameter>
-                </Parameters>
-            </Tool>
+            <Tool Name="Add" Method="Add"/>
         </ToolSet>
     }
 
-    Method Add(args As %DynamicObject) As %Float
+    /// Add two numbers (a and b) together and return the sum.
+    Method Add(a As %Float, b As %Float) As %Float
     {
-        Set a = args.a
-        Set b = args.b
         Return a + b
     }
 }
 ```
 
-**Note:** Tools with parameters receive a `%DynamicObject` containing the arguments.
+Each typed parameter becomes a JSON Schema property. Parameters without a default value
+are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean`,
+`%DynamicObject`, `%DynamicArray`, and any `%JSON.Adaptor` subclass.
 
 ### Method 3: Wrapping Existing Classes
 
-You can expose existing ObjectScript classes as tools.
+ToolSets can expose methods from existing classes — including methods whose documentation
+is written for developers rather than for an LLM. Use `<Description/>` to provide a
+clean replacement:
 
 ```objectscript
 Class MyApp.DataTools Extends %AI.ToolSet
@@ -780,22 +772,17 @@ Class MyApp.DataTools Extends %AI.ToolSet
     {
         <ToolSet Name="DataTools">
             <Tool Name="SearchPatients" Method="SearchPatients">
-                <Description>Search for patients by name.</Description>
-                <Parameters>
-                    <Parameter Name="name" Type="string" Required="true">
-                        <Description>Patient name to search for</Description>
-                    </Parameter>
-                </Parameters>
+                <!-- The method doc is internal; replace it with an LLM-friendly description -->
+                <Description>Search for patients by name. Returns a JSON array of matching records, each with id, name, and date of birth.</Description>
             </Tool>
         </ToolSet>
     }
 
-    Method SearchPatients(args As %DynamicObject) As %String
+    /// Internal: delegates to Patient.SearchByName, returns JSON for RPC layer.
+    Method SearchPatients(name As %String) As %String
     {
-        Set name = args.name
         Set results = ##class(MyApp.Patient).SearchByName(name)
 
-        // Format results as JSON
         Set output = []
         While results.%Next() {
             Do output.%Push({
@@ -809,6 +796,172 @@ Class MyApp.DataTools Extends %AI.ToolSet
     }
 }
 ```
+
+
+### Tool Descriptions
+
+The LLM reads two kinds of description from each tool: the **tool description** (what the
+tool does and when to call it) and **per-parameter descriptions** (what each argument
+means). Understanding where each comes from helps you choose the most natural way to
+document your tools.
+
+#### Tool description
+
+Resolved in priority order:
+
+| Priority | Source | When to use |
+|---|---|---|
+| 1 | XML `<Description/>` | Wrapping internal methods; any time the method doc is not suitable for an LLM audience |
+| 2 | Method doc comment (`///`) | Methods written specifically as tools, where the doc comment is already LLM-friendly |
+
+`<Description/>` is a complete replacement — it discards the method doc entirely for LLM
+purposes. Without it, the method's `///` comment is used verbatim, so write it with the
+LLM in mind: what does this tool do, what does it return, and when should the model
+call it?
+
+#### Parameter descriptions
+
+There are two ways to document parameters, and they can be combined freely:
+
+**1. In the tool description (most natural)**
+
+Document parameters as part of the method doc comment or `<Description/>`. The LLM reads
+the full tool description and understands parameter meaning from it:
+
+```objectscript
+/// Calculate the result of a simple arithmetic expression.
+/// a is the left operand, op is the operator (+ - * /), b is the right operand.
+Method Calculate(a As %Numeric, op As %String, b As %Numeric) As %String { ... }
+```
+
+**2. Via `DESCRIPTION` type parameters (structured)**
+
+Attach a description directly to each formal argument. This populates the per-parameter
+`description` field in the JSON Schema, separate from the tool description:
+
+```objectscript
+/// Calculate the result of a simple arithmetic expression.
+Method Calculate(
+    a As %Numeric(DESCRIPTION = "Left operand"),
+    op As %String(DESCRIPTION = "Operator: + - * /"),
+    b As %Numeric(DESCRIPTION = "Right operand")
+) As %String { ... }
+```
+
+Both approaches are effective — the LLM sees the tool description and the parameter
+schema, and draws on both. Documenting in the method doc is more natural for most
+developers. `DESCRIPTION` type parameters are more structured and explicitly annotate the
+schema, but the syntax is verbose. Use whichever fits your style; mixing them is fine.
+
+> **These two sources do not interact.** The method doc comment (or `<Description/>`)
+> drives the tool-level description string. `DESCRIPTION` type parameters populate
+> per-parameter schema fields. Neither affects the other.
+
+### Parameter Types and JSON Schema
+
+The JSON Schema sent to the LLM for each tool parameter is derived automatically from the
+ObjectScript type declared in the method signature. This applies to both tool parameters
+and return types.
+
+#### Primitive types
+
+| IRIS type | JSON Schema |
+|---|---|
+| `%String` | `{"type": "string"}` |
+| `%Integer` | `{"type": "integer"}` |
+| `%Float`, `%Numeric`, `%Double` | `{"type": "number"}` |
+| `%Boolean` | `{"type": "boolean"}` |
+| `%Date` | `{"type": "string", "format": "date"}` |
+| `%Time` | `{"type": "string", "format": "time"}` |
+| `%TimeStamp` | `{"type": "string", "format": "date-time"}` |
+| `%DynamicObject` | `{"type": "object"}` |
+| `%DynamicArray` | `{"type": "array"}` |
+| `%Stream.GlobalCharacter` | `{"type": "string"}` |
+| `%Stream.GlobalBinary` | `{"type": "string", "contentEncoding": "base64"}` |
+
+#### Class types
+
+When a parameter is typed to a concrete ObjectScript class (persistent, serial, or
+registered), the schema is built automatically from its compiled properties:
+
+```objectscript
+Class MyApp.Address Extends %RegisteredObject
+{
+    Property Street As %String;
+    Property City As %String;
+    Property ZipCode As %String;
+}
+
+/// Look up businesses near the given address.
+Method FindNearby(address As MyApp.Address, radiusMiles As %Float) As %DynamicArray { ... }
+```
+
+The LLM sees `address` as:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "Street": {"type": "string"},
+    "City":   {"type": "string"},
+    "ZipCode": {"type": "string"}
+  }
+}
+```
+
+Properties are reflected recursively — nested objects work automatically. Circular
+references are detected and short-circuit to `{"type": "object"}` rather than looping.
+
+#### %JSON.Adaptor classes
+
+If the parameter class extends `%JSON.Adaptor`, the schema respects its JSON
+configuration:
+
+- **`%JSONFIELDNAME`** — the schema uses the remapped field name, not the property name
+- **`%JSONINCLUDE = "none"` or `"outputonly"`** — the property is excluded from the schema
+
+```objectscript
+Class MyApp.Product Extends (%RegisteredObject, %JSON.Adaptor)
+{
+    Property ProductId As %Integer(%JSONFIELDNAME = "id");
+    Property Name As %String;
+    Property InternalCostCode As %String(%JSONINCLUDE = "none"); // hidden from the LLM
+}
+```
+
+Schema seen by the LLM:
+
+```json
+{"type": "object", "properties": {"id": {"type": "integer"}, "Name": {"type": "string"}}}
+```
+
+#### Collections and %DynamicArray
+
+Collection properties on class types map naturally:
+
+- `list of ClassName` → `{"type": "array", "items": { ...schema... }}`
+- `array of ClassName` → `{"type": "object", "additionalProperties": { ...schema... }}`
+
+For `%DynamicArray` parameters, add an `ELEMENTTYPE` type parameter to tell the framework
+what the array contains. Without it the schema is just `{"type": "array"}`; with it the
+element structure is included:
+
+```objectscript
+Method PlaceOrder(
+    customerId As %Integer(DESCRIPTION = "Customer ID"),
+    items As %DynamicArray(ELEMENTTYPE = "MyApp.OrderItem", DESCRIPTION = "Items to order")
+) As %String { ... }
+```
+
+`ELEMENTTYPE` is a schema hint only — it does not affect how the array value is passed to
+the method at runtime.
+
+> **Note:** Full class-type schema generation applies to plain `%AI.Tool` subclasses
+> (auto-discovered method tools). Tools declared in a ToolSet XML `<Tool/>` element use a
+> simplified schema (string/number/boolean only), since the ToolSet compiler does not have
+> visibility into the class hierarchy at compile time. For tools with complex object
+> parameters, prefer a plain `%AI.Tool` subclass.
+
 
 ### Method 4: Use Built-in Tools
 
@@ -855,11 +1008,6 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
             <!-- 1. Inline Tools -->
             <Tool Name="Echo" Method="Echo">
                 <Description>Echo back the input.</Description>
-                <Parameters>
-                    <Parameter Name="text" Type="string" Required="true">
-                        <Description>Text to echo</Description>
-                    </Parameter>
-                </Parameters>
             </Tool>
 
             <!-- 2. Include Other ToolSets -->
@@ -886,9 +1034,10 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
         </ToolSet>
     }
 
-    Method Echo(args As %DynamicObject) As %String
+    /// Echo back the input.
+    Method Echo(text As %String(DESCRIPTION = "Text to echo")) As %String
     {
-        Return "Echo: " _ args.text
+        Return "Echo: " _ text
     }
 }
 ```
@@ -1212,19 +1361,10 @@ Class MyApp.StreamCallback Extends %RegisteredObject
 {
     Property Buffer As %String;
 
-    Method OnChunk(delta As %DynamicObject)
+    Method OnChunk(chunk As %String)
     {
-        If delta.content '= "" {
-            Write delta.content
-            Set ..Buffer = ..Buffer _ delta.content
-        }
-
-        If delta.%IsDefined("tool_call") && (delta."tool_call" '= "") {
-            Set tc = delta."tool_call"
-            If tc.%IsDefined("name") && (tc.name '= "") {
-                Write !,  "[Calling tool: ", tc.name, "]", !
-            }
-        }
+        Write chunk
+        Set ..Buffer = ..Buffer _ chunk
     }
 }
 ```
@@ -1281,11 +1421,11 @@ Method AnalyzeImage(imagePath As %String, question As %String) As %String
     Do stream.LinkToFile(imagePath)
     Set base64 = $SYSTEM.Encryption.Base64Encode(stream)
 
-    // Create content parts
+    // Create content parts — use the internal format with "data" for base64 images
     Set content = [
         {"type": "text", "text": (question)},
         {"type": "image",
-         "url": ("data:image/jpeg;base64,"_base64),
+         "data": (base64),
          "mime_type": "image/jpeg"}
     ]
 
@@ -1515,7 +1655,7 @@ Do ##class(%AI.System).SetLogLevel("debug")
 
 1. Verify callback method signature:
 ```objectscript
-Method OnChunk(delta As %DynamicObject)
+Method OnChunk(chunk As %String)
 ```
 
 2. Check that model supports streaming
