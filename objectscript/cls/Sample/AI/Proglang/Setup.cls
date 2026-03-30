@@ -23,8 +23,8 @@ for transactional workloads.</Description>
     <Tag>object-oriented</Tag>
     <Tag>scripting</Tag>
     <Creator>
-      <FirstName>Jeffrey</FirstName>
-      <LastName>Chow</LastName>
+      <FirstName>Terry</FirstName>
+      <LastName>Ragon</LastName>
       <Company>InterSystems Corporation</Company>
     </Creator>
     <Logo>iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==</Logo>

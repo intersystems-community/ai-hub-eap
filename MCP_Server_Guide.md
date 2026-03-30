@@ -273,6 +273,29 @@ reconnect_interval_secs = 30
 # Seconds between tool-list refresh polls (default: 300)
 tool_refresh_interval_secs = 300
 
+# Maximum bytes to accumulate from IRIS for a single tool response (default: 10 MiB).
+# Increase for tools that return very large payloads; decrease if your LLM has a
+# small context window and is being overwhelmed by large results.
+max_response_bytes = 10485760
+
+# Seconds a pooled WebSocket session may sit idle before it is closed.
+# Closing an idle session causes the IRIS job to Halt, freeing its license slot.
+# Lower values free licenses faster; higher values reduce reconnection overhead.
+# Default: 300 (5 minutes).
+idle_timeout_secs = 300
+
+# Maximum number of concurrent pooled sessions per (endpoint, auth_context) pair.
+# Each OAuth user or opaque token gets its own pool up to this limit.
+# Prevents runaway license consumption when many distinct identities are active.
+# Default: same as pool.max.
+max_sessions_per_auth_context = 10
+
+# Hard cap on total session lifetime in seconds, regardless of activity.
+# When set, a session older than this is dropped the next time it becomes idle
+# (IRIS job Halts, license freed). Off by default — only idle_timeout_secs applies.
+# Useful in high-churn environments to guarantee periodic license recycling.
+# max_age_secs = 3600   # e.g. 1 hour
+
 # TLS for the wgproto connection to this instance (optional).
 # Presence of the tls field enables TLS; absence means plaintext.
 # tls = {}                                         # system CA roots
@@ -940,6 +963,27 @@ endpoints = [{ path = "/mcp/prod" }]
 ```
 
 Rule of thumb: `max` should be at least as large as the number of tool calls you expect to run simultaneously. `min` sets the number of sessions kept warm at idle.
+
+**Session lifetime tuning** — each pooled session corresponds to one IRIS license slot (job). Three settings control how long sessions live:
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `idle_timeout_secs` | 300 | Close sessions idle longer than this; IRIS job Halts, license freed |
+| `max_sessions_per_auth_context` | `pool.max` | Cap on concurrent sessions per OAuth user / token identity |
+| `max_age_secs` | off | Hard cap on total session lifetime; session dropped on next idle regardless of activity |
+
+In deployments with many OAuth users (each user gets their own session pool), lower `idle_timeout_secs` and set `max_sessions_per_auth_context` to prevent license exhaustion:
+
+```toml
+[[iris]]
+name                         = "production"
+server                       = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+pool                         = { min = 2, max = 10 }
+idle_timeout_secs            = 120   # free licenses after 2 minutes idle
+max_sessions_per_auth_context = 3    # each user may have at most 3 concurrent sessions
+max_age_secs                 = 3600  # recycle sessions after 1 hour regardless
+endpoints                    = [{ path = "/mcp/prod" }]
+```
 
 For multiple IRIS instances, each gets its own pool:
 
