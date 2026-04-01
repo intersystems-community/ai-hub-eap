@@ -148,7 +148,7 @@ transport = "stdio"
 
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 5 }
 endpoints = [
   { path = "/mcp/simple" },
@@ -250,7 +250,7 @@ name = "production"
 
 # wgproto super-server connection credentials.
 # Credential fields accept a literal value, @{env:VAR}, or @{vault:path#field}.
-server = { host = "iris.example.com", port = 52773, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
+server = { host = "iris.example.com", port = 1972, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
 
 # WebSocket session pool for this instance.
 pool = { min = 2, max = 10 }
@@ -459,7 +459,7 @@ Understanding both layers is essential — authenticating the connection to IRIS
 ```toml
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 ```
 
 These credentials are used once when the connection is established. For production, use secret references instead of literals:
@@ -467,7 +467,7 @@ These credentials are used once when the connection is established. For producti
 ```toml
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773,
+server = { host = "iris.example.com", port = 1972,
            username = "@{env:IRIS_GW_USER}", password = "@{vault:iris/gateway#password}" }
 ```
 
@@ -482,7 +482,7 @@ Credentials are configured per endpoint in the `endpoints` array:
 ```toml
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
+server = { host = "iris.example.com", port = 1972, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
 pool   = { min = 2, max = 10 }
 endpoints = [
   # Unauthenticated endpoint
@@ -540,7 +540,7 @@ vault = true
 ```toml
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773,
+server = { host = "iris.example.com", port = 1972,
            username = "@{vault:iris/gateway#username}",
            password = "@{vault:iris/gateway#password}" }
 pool   = { min = 10, max = 50 }
@@ -584,7 +584,7 @@ To encrypt the wgproto connection between iris-mcp-server and IRIS, add a `tls` 
 # TLS with system roots — simplest form
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "iris.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 tls    = {}
 endpoints = [{ path = "/mcp/prod" }]
@@ -592,7 +592,7 @@ endpoints = [{ path = "/mcp/prod" }]
 # TLS with a custom or self-signed IRIS CA certificate
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "iris.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 tls    = { ca_cert = "/etc/certs/iris-ca.crt" }
 endpoints = [{ path = "/mcp/prod" }]
@@ -600,7 +600,7 @@ endpoints = [{ path = "/mcp/prod" }]
 # Mutual TLS — iris-mcp-server presents a client certificate to IRIS
 [[iris]]
 name   = "production"
-server = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "iris.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 tls    = { ca_cert = "/etc/certs/iris-ca.crt",
            cert    = "/etc/certs/client.crt",
@@ -717,7 +717,7 @@ The background tool-refresh loop re-fetches tool lists every `tool_refresh_inter
 ```toml
 [[iris]]
 name                       = "dev"
-server                     = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server                     = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool                       = { min = 2, max = 5 }
 tool_refresh_interval_secs = 60     # more frequent polling during development
 endpoints                  = [{ path = "/mcp/myapp" }]
@@ -730,7 +730,7 @@ If `endpoints` is omitted from `[[iris]]`, iris-mcp-server queries the IRIS CSP 
 ```toml
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 5 }
 # endpoints omitted -> auto-discover /mcp* apps
 ```
@@ -760,7 +760,7 @@ If the connection to IRIS is lost (IRIS restart, network interruption), iris-mcp
 ```toml
 [[iris]]
 name                    = "dev"
-server                  = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server                  = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool                    = { min = 2, max = 5 }
 reconnect_interval_secs = 10     # retry faster during development
 endpoints               = [{ path = "/mcp/myapp" }]
@@ -776,7 +776,7 @@ When the LLM sees `iris_status` it means something went wrong. Calling it return
 
 ```
 iris_status result:
-- mcp_database: connection failed — refused at localhost:52773
+- mcp_database: connection failed — refused at localhost:1972
 - mcp_analytics: authentication error — 403 Forbidden (check endpoint credentials)
 ```
 
@@ -957,7 +957,7 @@ Each IRIS instance has its own WebSocket session pool, sized by `pool = { min, m
 ```toml
 [[iris]]
 name      = "production"
-server    = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server    = { host = "iris.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool      = { min = 5, max = 20 }    # up to 20 concurrent tool calls
 endpoints = [{ path = "/mcp/prod" }]
 ```
@@ -977,7 +977,7 @@ In deployments with many OAuth users (each user gets their own session pool), lo
 ```toml
 [[iris]]
 name                         = "production"
-server                       = { host = "iris.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server                       = { host = "iris.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool                         = { min = 2, max = 10 }
 idle_timeout_secs            = 120   # free licenses after 2 minutes idle
 max_sessions_per_auth_context = 3    # each user may have at most 3 concurrent sessions
@@ -990,13 +990,13 @@ For multiple IRIS instances, each gets its own pool:
 ```toml
 [[iris]]
 name   = "primary"
-server = { host = "iris1.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "iris1.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 5, max = 20 }
 endpoints = [{ path = "/mcp/prod" }]
 
 [[iris]]
 name   = "analytics"
-server = { host = "iris2.example.com", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "iris2.example.com", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [{ path = "/mcp/analytics" }]
 ```
@@ -1009,11 +1009,11 @@ endpoints = [{ path = "/mcp/analytics" }]
 
 **Problem:** `Failed to connect` / `ConnectionClosed`
 
-1. Verify the IRIS super-server is running on the configured port (default 52773)
+1. Verify the IRIS super-server is running on the configured port (default 1972)
 2. Verify the CSP web application exists and is enabled
 3. Check the Dispatch Class name is correct and the class is compiled in IRIS
 4. Confirm `server.username` / `server.password` in `[[iris]]` are correct — these are gateway-level credentials (`CSPSystem` or equivalent), not IRIS application user credentials
-5. Check firewall rules allow TCP to IRIS port 52773
+5. Check firewall rules allow TCP to IRIS port 1972
 
 ### Connected but No Tools Appear
 
@@ -1103,7 +1103,7 @@ transport = "stdio"
 
 [iris]
 host      = "localhost"
-port      = 52773
+port      = 1972
 namespace = "USER"
 username  = "CSPSystem"
 password  = "SYS"
@@ -1127,7 +1127,7 @@ transport = "stdio"
 
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [
   { path = "/mcp/myapp", username = "myuser", password = "mypass" },

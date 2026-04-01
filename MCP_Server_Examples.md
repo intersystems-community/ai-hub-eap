@@ -71,7 +71,7 @@ transport = "stdio"
 
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [
   { path = "/mcp/calculator" },
@@ -93,7 +93,7 @@ transport = "stdio"
 
 [[iris]]
 name   = "local"
-server = { host = "localhost", port = 52773, username = "CSPSystem", password = "SYS" }
+server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
 pool   = { min = 2, max = 10 }
 endpoints = [
   { path = "/mcp/calculator", username = "_SYSTEM", password = "SYS" },
