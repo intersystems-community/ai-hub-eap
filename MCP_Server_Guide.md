@@ -255,7 +255,7 @@ server = { host = "iris.example.com", port = 1972, username = "@{env:WG_USER}", 
 # WebSocket session pool for this instance.
 pool = { min = 2, max = 10 }
 
-# MCP endpoint paths on this IRIS instance.
+# MCP Server paths (endpoints) on this IRIS instance.
 # Each entry is an MCP Server path, with optional application-layer auth.
 # Auth options per endpoint:
 #   username + password  ->  HTTP Basic (Authorization: Basic ...)
@@ -364,7 +364,7 @@ All flags before the subcommand are global:
 | `--iris-port=<port>` | IRIS super-server port |
 | `--iris-user=<user>` | IRIS connection username |
 | `--iris-password=<pass>` | IRIS connection password |
-| `--iris-endpoint=<path>` | MCP endpoint path — may be repeated for multiple endpoints |
+| `--iris-endpoint=<path>` | MCP Server path — may be repeated for multiple endpoints |
 | `--auto-discover-interval=<secs>` | Poll for local IRIS instances every N seconds (0 = disabled) |
 | `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
 
@@ -448,7 +448,7 @@ iris-mcp-server has two independent authentication layers that serve different p
 | Layer | What it secures | Where configured |
 |-------|-----------------|-----------------|
 | **IRIS server auth** | iris-mcp-server connecting to the IRIS server | `[[iris]] server.username` / `server.password` |
-| **MCP endpoint auth** | Per-request identity presented to each IRIS MCP endpoint | `[[iris]] endpoints[].username/password/bearer` |
+| **MCP endpoint auth** | Per-request identity presented to each IRIS MCP Server | `[[iris]] endpoints[].username/password/bearer` |
 
 Understanding both layers is essential — authenticating the connection to IRIS does **not** automatically authenticate individual requests to the MCP endpoint inside it.
 
@@ -740,11 +740,11 @@ When `--auto-discover-interval=N` is set, the server polls for locally-running I
 
 ### Tool Namespacing
 
-When multiple MCP endpoints are connected, tools from each service are prefixed with a **service ID** derived from the endpoint path. This prevents name collisions and tells the LLM which service a tool belongs to.
+When multiple MCP Servers are connected, tools from each service are prefixed with a **service ID** derived from the MCP Server's path. This prevents name collisions and tells the LLM which service a tool belongs to.
 
-The service ID is the endpoint path with the leading slash stripped and remaining slashes replaced with underscores:
+The service ID is the endpoint path of the MCP Server with the leading slash stripped and remaining slashes replaced with underscores:
 
-| Endpoint path | Service ID prefix | Example tool name |
+| MCP Server name | Service ID prefix | Example tool name |
 |---------------|-------------------|-------------------|
 | `/mcp` | `mcp` | `mcp_ExecuteQuery` |
 | `/mcp/database` | `mcp_database` | `mcp_database_ExecuteQuery` |
@@ -1039,10 +1039,10 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 
 **Problem:** `Tool call error: 403 Forbidden`
 
-IRIS is reachable (Layer 1 OK) but the MCP endpoint is rejecting the request (Layer 2 failing):
+IRIS is reachable (Layer 1 OK) but the MCP Server is rejecting the request (Layer 2 failing):
 
-1. Verify the endpoint entry in `[[iris]] endpoints` has the correct `username`/`password` or `bearer` for that endpoint
-2. For HTTP Basic: confirm the username/password are valid IRIS credentials with access to the endpoint
+1. Verify the endpoint entry in `[[iris]] endpoints` has the correct `username`/`password` or `bearer` for that MCP Server
+2. For HTTP Basic: confirm the username/password are valid IRIS credentials with access to the server
 3. For OAuth passthrough: confirm the MCP client is sending a valid `Authorization` header
 4. Check the MCP Server's authentication settings in the Management Portal
 
