@@ -11,7 +11,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
   - [Overview](#overview)
   - [Quick Start](#quick-start)
     - [1. Create IRIS Backend](#1-create-iris-backend)
-    - [2. Configure Web Application](#2-configure-web-application)
+    - [2. Configure MCP Server](#2-configure-mcp-server)
     - [3. Run iris-mcp-server](#3-run-iris-mcp-server)
     - [4. Configure Claude Desktop](#4-configure-claude-desktop)
   - [Architecture](#architecture)
@@ -38,7 +38,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Simple Tool](#simple-tool)
     - [ToolSet with Policies](#toolset-with-policies)
     - [MCP Service Class](#mcp-service-class)
-    - [Configure Web Application](#configure-web-application)
+    - [Configure MCP Server](#configure-mcp-server)
   - [Service Discovery](#service-discovery)
     - [How Discovery Works](#how-discovery-works)
     - [Tool Refresh](#tool-refresh)
@@ -92,7 +92,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
 │  - Connection pool  │
 │  - RAG discovery    │
 └──────────┬──────────┘
-           │ IRIS Gateway Protocol
+           │ IRIS Web Gateway Protocol
            ▼
 ┌─────────────────────┐
 │  %AI.MCP.Service    │  (IRIS ObjectScript)
@@ -125,9 +125,9 @@ Class MyApp.MCP.SimpleService Extends %AI.MCP.Service
 }
 ```
 
-### 2. Configure Web Application
+### 2. Configure MCP Server
 
-In the IRIS Management Portal create a CSP web application:
+In the IRIS Management Portal create an MCP Server:
 - **Name:** `/mcp/simple`
 - **Dispatch Class:** `MyApp.MCP.SimpleService`
 - **Authentication:** Password (or Unauthenticated for dev)
@@ -256,7 +256,7 @@ server = { host = "iris.example.com", port = 1972, username = "@{env:WG_USER}", 
 pool = { min = 2, max = 10 }
 
 # MCP endpoint paths on this IRIS instance.
-# Each entry is a CSP web application path, with optional application-layer auth.
+# Each entry is an MCP Server path, with optional application-layer auth.
 # Auth options per endpoint:
 #   username + password  ->  HTTP Basic (Authorization: Basic ...)
 #   bearer               ->  Bearer token (Authorization: Bearer ...)
@@ -475,7 +475,7 @@ server = { host = "iris.example.com", port = 1972,
 
 ### Layer 2 — MCP Endpoint Credentials
 
-Once connected to IRIS, each request targets a specific MCP endpoint — a CSP web application that maps a URL path to a `%AI.MCP.Service` subclass. If that endpoint requires authentication, IRIS returns **403 Forbidden** unless credentials accompany each request.
+Once connected to IRIS, each request targets a specific MCP endpoint — an MCP Server definition that maps a URL path to a `%AI.MCP.Service` subclass. If that endpoint requires authentication, IRIS returns **403 Forbidden** unless credentials accompany each request.
 
 Credentials are configured per endpoint in the `endpoints` array:
 
@@ -685,16 +685,15 @@ Class MyApp.MCP.DatabaseService Extends %AI.MCP.Service
 }
 ```
 
-### Configure Web Application
+### Configure MCP Server
 
 1. Open IRIS Management Portal
-2. Navigate to: **System Administration → Security → Applications → Web Applications**
+2. Navigate to: **System Administration → Security → Applications → MCP Servers**
 3. Create a new application:
    - **Name:** `/mcp/database`
    - **Namespace:** USER
-   - **Dispatch Class:** `MyApp.MCP.DatabaseService`
+   - **Dispatch Class:** `MyApp.MCP.DatabaseService` (this is your `%AI.ToolSet` subclass)
    - **Enabled:** Yes
-   - **CSP/ZEN:** Yes
    - **Authentication:** Password (or Unauthenticated for dev/internal use)
 
 ---
@@ -1010,7 +1009,7 @@ endpoints = [{ path = "/mcp/analytics" }]
 **Problem:** `Failed to connect` / `ConnectionClosed`
 
 1. Verify the IRIS super-server is running on the configured port (default 1972)
-2. Verify the CSP web application exists and is enabled
+2. Verify the MCP Server definition exists and is enabled
 3. Check the Dispatch Class name is correct and the class is compiled in IRIS
 4. Confirm `server.username` / `server.password` in `[[iris]]` are correct — these are gateway-level credentials (`CSPSystem` or equivalent), not IRIS application user credentials
 5. Check firewall rules allow TCP to IRIS port 1972
@@ -1025,7 +1024,7 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 
 1. Verify the `SPECIFICATION` parameter on the MCP Service class is non-empty and references the correct class names
 2. Confirm all listed tool/toolset classes are compiled in the correct IRIS namespace
-3. Confirm the CSP web application's **Namespace** matches where the classes are compiled
+3. Confirm the MCP Server's **Namespace** matches where the classes are compiled
 4. Run iris-mcp-server with `--log-level=debug` and look for the tool count logged during discovery — if it shows 0 tools, the issue is on the IRIS side (empty `SPECIFICATION`, uncompiled classes, or wrong namespace)
 
 ### Tool Not Found
@@ -1045,7 +1044,7 @@ IRIS is reachable (Layer 1 OK) but the MCP endpoint is rejecting the request (La
 1. Verify the endpoint entry in `[[iris]] endpoints` has the correct `username`/`password` or `bearer` for that endpoint
 2. For HTTP Basic: confirm the username/password are valid IRIS credentials with access to the endpoint
 3. For OAuth passthrough: confirm the MCP client is sending a valid `Authorization` header
-4. Check the CSP web application's authentication settings in the Management Portal
+4. Check the MCP Server's authentication settings in the Management Portal
 
 ### Secret Resolution Failures
 
