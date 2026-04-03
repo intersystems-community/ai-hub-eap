@@ -37,6 +37,8 @@ Install Ollama with the `llama3.2` model. See https://ollama.com/ for instructio
 
 ### Creating the configurations
 
+:information_source: for more details about the Config Store, see [the User Guide](Config_Store_Guide.md).
+
 See the 4 parameters at the top of `ConfigStoreTest.cls`. Replace them with values appropriate for your local environment. Load the class into the IRIS instance and execute the following command:
 
 ```ObjectScript
