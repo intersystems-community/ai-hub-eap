@@ -175,6 +175,16 @@ Safe file and directory operations.
 - `BaseDirectory` - Root directory for operations
 - `MaxFileSize` - Maximum file size to read (default 1MB)
 
+### RLM ToolSet (`Sample.AI.Tools.RLM`)
+
+RLM-oriented toolset for large-context exploration via explicit tool workflow:
+
+- `inspect_context()`
+- `search_context(query, limit)`
+- `store_note(note)`
+- `summarize_notes()`
+- `finalize(result)`
+
 ## Sample Policies
 
 :warning: advanced / experimental feature -- this capability may change significantly before GA release
@@ -226,6 +236,23 @@ Do ##class(Sample.AI.Examples.MultiModal).Run()
 
 // Policy example
 Do ##class(Sample.AI.Examples.PolicyEnforcement).AuthorizationExample()
+```
+
+### RLM-style %AI.Agent subclass
+
+`Sample.AI.RLMAgent` extends `%AI.Agent` and packages the RLM toolset + loop behavior.
+
+```objectscript
+Set settings = {"api_key":$SYSTEM.Util.GetEnviron("OPENAI_API_KEY")}
+Set provider = ##class(%AI.Provider).Create("openai", settings)
+
+Set agent = ##class(Sample.AI.RLMAgent).%New(provider)
+Set agent.Model = "gpt-4o"
+
+Set context = "Encounter timeline... Medication changes... Claims notes..."
+Set result = agent.RunRLM("Summarize top 3 interoperability risks.", context, 6)
+
+Write result.%ToJSON(), !
 ```
 
 ## Example Categories
