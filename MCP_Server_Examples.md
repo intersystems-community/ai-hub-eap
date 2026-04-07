@@ -1,10 +1,10 @@
 # Sample MCP Services
 
-The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes for testing and demonstrating iris-mcp-server integration with IRIS.
+The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes for testing and demonstrating `iris-mcp-server` integration with InterSystems IRIS.
 
 ## MCP Services
 
-### Sample.MCP.Service.Calculator
+### `Sample.MCP.Service.Calculator`
 
 **Purpose**: Sample/demo MCP service with policies
 
@@ -13,26 +13,31 @@ The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes
 
 **Use case**: Demonstrates best practices for production MCP services with policy enforcement
 
-## Setup in IRIS
+## Setup in InterSystems IRIS
+
+The following procedure shows how to integrate `iris-mcp-server` with InterSystems IRIS.
 
 ### 1. Load the Classes
 
-```objectscript
-USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "ck", .errors, 1)
-```
+Load the provided sample classes:
+
+  ```objectscript
+  // In InterSystems IRIS Terminal
+  USER> Do $system.OBJ.ImportDir("/path/to/examples/objectscript/cls", "*.cls", "ck", .errors, 1)
+  ```
 
 ### 2. Create MCP Server for Calculator Service
 
 1. Open System Management Portal
-2. Navigate to: **System Administration > Security > Applications > MCP Servers**
-3. Click **"Create New MCP Server"**
+2. Go to: **System Administration > Security > Applications > MCP Servers**
+3. Create a MCP server for the `Calculator` service by clicking **Create New MCP Server** and specifying the following:
 4. Configure:
    - **Name**: `/mcp/calculator`
    - **Namespace**: `USER` (or your namespace)
    - **Dispatch Class**: `Sample.MCP.Service.Calculator`
-   - **Enabled**: Yes
+   - **Enabled**: ✓ Yes
    - **Authentication**: Password (or Unauthenticated for dev)
-5. Save
+5. Click **Save**.
 
 Alternatively, you can create the MCP Server programmatically:
 
@@ -56,14 +61,14 @@ iris-mcp-server has two independent authentication layers:
 
 | Layer | What it secures | Where configured |
 |-------|-----------------|-----------------|
-| **wgproto transport** | iris-mcp-server to IRIS web gateway | `[[iris]] server.username` / `server.password` |
+| **wgproto transport** | `iris-mcp-server` to IRIS web gateway | `[[iris]] server.username` / `server.password` |
 | **CSP application** | Per-request user identity for each endpoint | `[[iris]] endpoints[].username` / `password` / `bearer` |
 
 The transport credential (`CSPSystem`) opens the connection. If the CSP web application requires authentication, the endpoint credential supplies the user identity for each request.
 
 ### Basic Configuration (Unauthenticated endpoint)
 
-If the web application is configured with **Authentication: None** (typical for dev), only the transport credential is needed:
+If the web application is configured with **Authentication: None** (typical for development), only the transport credential is needed:
 
 ```toml
 [mcp]
@@ -113,11 +118,11 @@ endpoints = [
 ]
 ```
 
-For Remote MCP (HTTP/SSE) with OAuth, the `Authorization` header from each incoming MCP client session is forwarded to IRIS automatically — no endpoint credentials needed.
+For Remote MCP (HTTP/SSE) with OAuth, the `Authorization` header from each incoming MCP client session is forwarded to InterSystems IRIS automatically — no endpoint credentials needed.
 
-## Run iris-mcp-server
+## Run `iris-mcp-server`
 
-Use the following command to run iris-mcp-server with a configuration file.
+Use the following command to run `iris-mcp-server` with a configuration file.
 
 ```bash
 iris-mcp-server --config test-config.toml run
@@ -166,9 +171,11 @@ asyncio.run(test_iris_mcp())
 
 ## Tool Reference
 
-### Math Tools (Sample.AI.Tools.Math)
+This repository includes a set of simple tools that can be used by your agents. You should use these as a reference when creating your own tools.
 
-#### Add(a, b)
+### Math Tools (`Sample.AI.Tools.Math`)
+
+#### `Add(a, b)`
 Adds two numbers.
 
 **Parameters**:
@@ -185,14 +192,14 @@ Adds two numbers.
 }
 ```
 
-#### Subtract(a, b)
-Subtracts b from a.
+#### `Subtract(a, b)`
+Subtracts `b` from `a`.
 
-#### Multiply(a, b)
-Multiplies two numbers.
+#### `Multiply(a, b)`
+Returns the product of `a` and `b`.
 
-#### Divide(a, b)
-Divides a by b. Returns an error object if b is zero.
+#### `Divide(a, b)`
+Divides `a` by `b`. Returns an error object if `b` is zero.
 
 **Error example**:
 ```json
@@ -201,33 +208,3 @@ Divides a by b. Returns an error object if b is zero.
   "code": "DIVIDE_BY_ZERO"
 }
 ```
-
-### Test Utilities (Sample.AI.Tools.TestUtilities)
-
-#### Echo(text)
-Returns the input text with length and timestamp metadata.
-
-#### GetTestData()
-Returns structured data with various JSON types for serialization testing.
-
-#### Fail(message)
-Always throws with the specified message. Tests error propagation.
-
-**Parameters**:
-- `message` (String): Error message (default: "Intentional test failure")
-
-#### Slow(milliseconds)
-Sleeps for the specified duration then returns timing info. Tests timeout handling.
-
-**Parameters**:
-- `milliseconds` (Integer): Sleep duration (default: 1000)
-
-#### GetTimestamp()
-Returns the current timestamp in HOROLOG, ISO 8601, and Unix formats.
-
-#### ValidateParams(required, optional)
-Echoes back parameters to test required vs optional argument handling.
-
-## Automated Testing
-
-See the Python test suite in `iris-mcp/tests/` for automated integration tests using these services.

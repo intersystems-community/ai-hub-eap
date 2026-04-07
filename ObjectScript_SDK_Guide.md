@@ -5,11 +5,11 @@
 
 ## Overview
 
-InterSystems AI Hub is a comprehensive framework for building AI-powered applications in InterSystems IRIS using ObjectScript. It provides a native, object-oriented API for interacting with Large Language Models (LLMs) and building agentic applications with tool calling capabilities.
+InterSystems AI Hub is a comprehensive framework for building AI-powered applications in InterSystems IRIS using ObjectScript. It provides a native, object-oriented API for interacting with Large Language Models (LLMs) and building agentic applications with tool-calling capabilities.
 
 ### What is the InterSystems AI Hub?
 
-The AI Hub bridges the gap between ObjectScript applications and modern LLM providers. It allows you to:
+The InterSystems AI Hub bridges the gap between ObjectScript applications and modern LLM providers. It allows you to:
 
 - **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI Grok, NVIDIA NIM
 - **Build AI agents** - Create autonomous agents that can use tools to accomplish complex tasks
@@ -61,38 +61,44 @@ The AI Hub uses the IRIS Wallet to store credentials, through a new facility cal
 
 ### Current method: Environment Variables (Requires IRIS Restart)
 
-The standard approach is to set environment variables:
+The standard approach is to set environment variables which can then be retrieved by InterSystems IRIS with `$SYSTEM.Util.GetEnviron()`:
 
-**On Linux/macOS:**
-```bash
-export OPENAI_API_KEY="sk-..."
-# OR
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Then restart IRIS
-iris stop <instance>
-iris start <instance>
-```
-
-**On Windows PowerShell:**
-```powershell
-$env:OPENAI_API_KEY = "sk-..."
-# OR
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
-
-# Then restart IRIS
-iris stop <instance>
-iris start <instance>
-```
+1. Set environment variables.
+    Linux and macOS:
+    ```bash
+    export OPENAI_API_KEY="sk-..."
+    # OR
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    ```
+    
+    In Windows, `$SYSTEM.Util.GetEnviron()` can only retrieve system-level environment variables. To set system-level variables, open an elevated PowerShell session:
+    ```powershell
+    [Environment]::SetEnvironmentVariable('OPENAI_API_KEY', 'sk-...', 'Machine')
+    # OR
+    [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'sk-ant-...', 'Machine')
+    ```
+    
+2. Restart InterSystems IRIS to make your changes visible to the InterSystems IRIS process.
+    ```bash
+    # Then restart InterSystems IRIS
+    iris stop <instance>
+    iris start <instance>
+    ```
 
 **Important:** IRIS must be restarted after setting environment variables for them to be visible to the IRIS process.
 
 ### Verifying API Key Setup
 
+You can verify whether InterSystems IRIS can see your API key using `SYSTEM.Util.GetEnviron()`:
+
 ```objectscript
 // Check environment variable
 USER> Write $System.Util.GetEnviron("OPENAI_API_KEY")
+```
 
+Alternatively, you can verify that the API key works by attempting to create an `%AI.Provider`:
+
+```objectscript
 // Quick test
 USER> Set provider = ##class(%AI.Provider).Create("openai", {"api_key": "sk-..."})
 USER> Write provider.Name
@@ -207,16 +213,14 @@ If provider.HasCapability("StreamingResponse") {
 
 ### %AI.Agent - Execution Engine
 
-The `%AI.Agent` class is the core execution engine. It manages the interaction between the LLM, tools, and policies. This is what orchestrates multi-turn conversations with tool calling.
+The `%AI.Agent` class is the core execution engine. It manages the interaction between the LLM, tools, and policies. This is what orchestrates multi-turn conversations with tool-calling. It is responsible for:
+- Executing LLM requests with tool schemas
+- Handling tool call responses from the LLM
+- Invoking tools through the ToolManager
+- Applying authorization and audit policies
+- Managing streaming and feedback
 
-**Key Responsibilities:**
-- Execute LLM requests with tool schemas
-- Handle tool call responses from the LLM
-- Invoke tools through the ToolManager
-- Apply authorization and audit policies
-- Manage streaming and feedback
-
-**Properties:**
+The `AI.Agent` has the following properties:
 
 ```objectscript
 Property Provider As %AI.Provider       // LLM provider
@@ -226,7 +230,10 @@ Property Temperature As %Float           // Randomness (0.0-2.0)
 Property ToolManager As %AI.ToolMgr      // Tool and policy manager
 ```
 
-**Creating an Agent:**
+#### Creating an Agent
+
+To create an agent, create an instance of `%AI.Provider` and then pass that into the `%AI.Agent` constructor, specifying the `Model`, `SystemPrompt`, and `Temperature`. The following example creates a provider with an OpenAI provider and prompts it to be an assistant:
+
 
 ```objectscript
 Set provider = ##class(%AI.Provider).Create("openai", {"api_key": apiKey})
@@ -236,9 +243,9 @@ Set agent.SystemPrompt = "You are a helpful assistant."
 Set agent.Temperature = 0.7
 ```
 
-**Model Settings Configuration:**
+#### Configuring the Model
 
-You can configure LLM parameters when creating a session using a JSON configuration object:
+You can configure LLM parameters by passing in a `JSON` configuration object when you create the session:
 
 ```objectscript
 // Create session with model settings
@@ -260,7 +267,7 @@ Set config = {
 Set session = agent.CreateSession(config)
 ```
 
-**Model Settings Guidelines:**
+The following table gives general guidelines for model settings:
 
 | Parameter | Range | Best For |
 |-----------|-------|----------|
@@ -300,9 +307,9 @@ Set conciseConfig = {
 }
 ```
 
-**Declarative Agent Configuration:**
+#### Declarative Agent Configuration
 
-For easier agent creation, you can subclass `%AI.Agent` and use Parameters and XData blocks for declarative configuration:
+You can simplify agent creation with a declarative configuration. To do this, subclass `%AI.Agent` and then use Parameters and XData blocks to pre-configure the agent. The table below shows the supported provider parameters:
 
 ```objectscript
 Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
@@ -340,8 +347,7 @@ You are a helpful AI assistant specialized in file system operations.
 }
 ```
 
-Then create the agent — `%New()` allocates it, `%Init()` wires up the provider, loads
-`XData INSTRUCTIONS`, and registers the `TOOLSETS`:
+You can then create an instance of the agent with `%New()` and configure it with `Init()` (connects to the provider, loads `XData INSTRUCTIONS` and registers `TOOLSETS`):
 
 ```objectscript
 Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
@@ -349,7 +355,9 @@ $$$ThrowOnError(agent.%Init())
 // Provider, model, system prompt, and toolsets are all configured
 ```
 
-**Supported Configuration Parameters:**
+**Supported Configuration Parameters**
+
+The following table lists the relevant configuration parameters for `%AI.Agent` subclasses:
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
@@ -359,125 +367,173 @@ $$$ThrowOnError(agent.%Init())
 | `PROVIDERCONFIG` | JSON config (for complex providers) | `{"region": "us-east-1", ...}` |
 | `TOOLSETS` | Comma-separated ToolSet classes | `"%AI.Tools.FileSystem,%AI.Tools.SQL"` |
 
-**Configuration Priority:**
+The following example creates a declarative agent configuration using the `PROVIDER`, `MODEL`, `APIKEY`, and `TOOLSETS` properties. It also contains system `INSTRUCTIONS` with an XData block, which prompts the agent with a description and a list of tools.
+
+1. Subclass `%AI.Agent`, specifying the following parameters and instructions:
+    ```objectscript
+    Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
+    {
+    /// Provider to use
+    Parameter PROVIDER = "anthropic";
+
+    /// Model to use
+    Parameter MODEL = "claude-sonnet-4-5@20250929";
+
+    /// API Key (reads from ANTHROPIC_API_KEY if not set)
+    Parameter APIKEY;
+
+    /// Comma-separated list of ToolSets
+    Parameter TOOLSETS = "%AI.Tools.FileSystem,%AI.Tools.BMI";
+
+    /// System Instructions in Markdown
+    XData INSTRUCTIONS [ MimeType = text/markdown ]
+    {
+    # File System Assistant
+
+    You are a helpful AI assistant specialized in file system operations.
+
+    ## Available Tools
+    - File System Operations
+    - BMI Calculator
+    }
+
+    /// Custom initialization hook (optional)
+    Method %OnInit() As %Status
+    {
+        // Configure additional properties if needed
+        Return $$$OK
+    }
+    }
+    ```
+
+2. Create a new instance of the agent. Because the class definition of `Sample.AI.Agent.FileSystemAgent` already contains the provider as a parameter, you do not need to specify it on instantiation:
+
+    ```objectscript
+    Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+    // Provider, model, system prompt, and toolsets are all configured!
+    ```
+
+**Configuration Priority**:
+
+Settings for declarative agents are prioritized as follows:
 
 1. Runtime assignment (highest): `Set agent.Model = "..."`
 2. Property `InitialExpression`
 3. Parameter value
 4. XData block content
 
-**Using Declarative Agents:**
+##### Using Declarative Agents
 
-The `Sample.AI.Agent.FileSystemAgent` class demonstrates the three main interaction patterns:
+The `Sample.AI.Agent.FileSystemAgent` class demonstrates the three main interaction patterns: blocking chat, streaming chat, and multi-modal content:
 
-1. **Blocking Chat** - Synchronous request/response:
+- **Blocking Chat** - Synchronous request/response:
 
-```objectscript
-ClassMethod DemoChat() As %Status
-{
-    Write !, "=== Blocking Chat Demo ===", !
-
-    // Create agent - provider created from PROVIDER parameter
-    Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
-    $$$ThrowOnError(agent.%Init())
-
-    Write "Provider: ", agent.Provider.Name, !
-    Write "Model: ", agent.Model, !
-
-    // Create chat session
-    Set session = agent.CreateSession()
-
-    // Simple interaction
-    Write !, "Asking about available tools...", !
-    Set response = agent.Chat(session, "What tools do you have access to?")
-    Write !, "Response: ", response.Content, !
-
-    // Interaction with tool use
-    Write !, !, "Asking to list files...", !
-    Set response = agent.Chat(session, "List the files in the current directory")
-    Write !, "Response: ", response.Content, !
-
-    // Show stats
-    Set stats = session.GetStats()
-    Write !, "Session Stats:", !
-    Write "  Interactions: ", stats."total_interactions", !
-    Write "  Tool Calls: ", stats."total_tool_calls", !
-    Write "  Total Tokens: ", (stats."total_prompt_tokens" + stats."total_completion_tokens"), !
-
-    Return $$$OK
-}
-```
-
-2. **Streaming Chat** - Real-time response chunks:
-
-```objectscript
-ClassMethod DemoStream() As %Status
-{
-    Write !, "=== Streaming Chat Demo ===", !
-
-    // Create agent
-    Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
-    $$$ThrowOnError(agent.%Init())
-
-    // Create chat session
-    Set session = agent.CreateSession()
-
-    // Stream interaction with callback
-    Write !, "Streaming response...", !
-    Set callback = ##class(Sample.AI.Agent.StreamCallback).%New()
-    Set response = agent.StreamChat(session, "Tell me about file system operations", callback, "OnChunk")
-
-    Write !, !, "Final response length: ", $LENGTH(response.Content), " chars", !
-
-    Return $$$OK
-}
-
-/// Simple streaming callback for demo
-Class Sample.AI.Agent.StreamCallback Extends %RegisteredObject
-{
-    Method OnChunk(chunk As %String)
+    ```objectscript
+    ClassMethod DemoChat() As %Status
     {
-        Write chunk
+        Write !, "=== Blocking Chat Demo ===", !
+
+        // Create agent - provider created from PROVIDER parameter
+        Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+        $$$ThrowOnError(agent.%Init())
+
+        Write "Provider: ", agent.Provider.Name, !
+        Write "Model: ", agent.Model, !
+
+        // Create chat session
+        Set session = agent.CreateSession()
+
+        // Simple interaction
+        Write !, "Asking about available tools...", !
+        Set response = agent.Chat(session, "What tools do you have access to?")
+        Write !, "Response: ", response.Content, !
+
+        // Interaction with tool use
+        Write !, !, "Asking to list files...", !
+        Set response = agent.Chat(session, "List the files in the current directory")
+        Write !, "Response: ", response.Content, !
+
+        // Show stats
+        Set stats = session.GetStats()
+        Write !, "Session Stats:", !
+        Write "  Interactions: ", stats."total_interactions", !
+        Write "  Tool Calls: ", stats."total_tool_calls", !
+        Write "  Total Tokens: ", (stats."total_prompt_tokens" + stats."total_completion_tokens"), !
+
+        Return $$$OK
     }
-}
-```
+    ```
 
-3. **Multi-Modal Content** - Text with images or other media:
+- **Streaming Chat** - Real-time response chunks:
 
-```objectscript
-ClassMethod DemoMultiModal() As %Status
-{
-    Write !, "=== Multi-Modal Demo ===", !
+    ```objectscript
+    ClassMethod DemoStream() As %Status
+    {
+        Write !, "=== Streaming Chat Demo ===", !
 
-    // Create agent
-    Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
-    $$$ThrowOnError(agent.%Init())
+        // Create agent
+        Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+        $$$ThrowOnError(agent.%Init())
 
-    // Create chat session
-    Set session = agent.CreateSession()
+        // Create chat session
+        Set session = agent.CreateSession()
 
-    // Build multi-modal content (text + image)
-    Set content = []
-    Do content.%Push({
-        "type": "text",
-        "text": "What do you see in this image?"
-    })
-    Do content.%Push({
-        "type": "image_url",
-        "image_url": {
-            "url": "https://example.com/image.jpg"
+        // Stream interaction with callback
+        Write !, "Streaming response...", !
+        Set callback = ##class(Sample.AI.Agent.StreamCallback).%New()
+        Set response = agent.StreamChat(session, "Tell me about file system operations", callback, "OnChunk")
+
+        Write !, !, "Final response length: ", $LENGTH(response.Content), " chars", !
+
+        Return $$$OK
+    }
+
+    /// Simple streaming callback for demo
+    Class Sample.AI.Agent.StreamCallback Extends %RegisteredObject
+    {
+        Method OnChunk(chunk As %String)
+        {
+            Write chunk
         }
-    })
+    }
+    ```
 
-    // Send multi-modal content
-    Set response = agent.ChatWithContent(session, content)
-    Write !, "Response: ", response.Content, !
+- **Multi-Modal Content** - Text with images or other media:
 
-    Return $$$OK
-}
-```
+    ```objectscript
+    ClassMethod DemoMultiModal() As %Status
+    {
+        Write !, "=== Multi-Modal Demo ===", !
 
-**Running the Demos:**
+        // Create agent
+        Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+        $$$ThrowOnError(agent.%Init())
+
+        // Create chat session
+        Set session = agent.CreateSession()
+
+        // Build multi-modal content (text + image)
+        Set content = []
+        Do content.%Push({
+            "type": "text",
+            "text": "What do you see in this image?"
+        })
+        Do content.%Push({
+            "type": "image_url",
+            "image_url": {
+                "url": "https://example.com/image.jpg"
+            }
+        })
+
+        // Send multi-modal content
+        Set response = agent.ChatWithContent(session, content)
+        Write !, "Response: ", response.Content, !
+
+        Return $$$OK
+    }
+    ```
+
+The provided `Sample.AI.Agent.FileSystemAgent` class contains demos for each of the main interaction patterns. To run them:
 
 ```objectscript
 // Run individual demos
@@ -489,7 +545,7 @@ Do ##class(Sample.AI.Agent.FileSystemAgent).DemoMultiModal()
 Do ##class(Sample.AI.Agent.FileSystemAgent).Demo()
 ```
 
-**Core Methods:**
+The core methods for these interaction patterns are:
 
 ```objectscript
 // Blocking interaction
@@ -547,7 +603,7 @@ Set session = agent.CreateSession(config)
 
 **Advanced: Direct Session Creation**
 
-For advanced use cases, you can create sessions directly:
+For advanced use cases, you can also create sessions directly:
 
 ```objectscript
 Set session = ##class(%AI.Agent.Session).Create(
@@ -561,6 +617,8 @@ Set session = ##class(%AI.Agent.Session).Create(
 
 **Session Statistics:**
 
+The `GetStats()` method provides information about the session:
+
 ```objectscript
 Set stats = session.GetStats()
 
@@ -570,6 +628,25 @@ Write "Completion tokens: ", stats."total_completion_tokens", !
 Write "Tool calls: ", stats."total_tool_calls", !
 Write "LLM time: ", stats."total_llm_duration_ms", "ms", !
 ```
+
+You can use this method to monitor performance:
+
+```objectscript
+// Track session performance
+Set stats = session.GetStats()
+
+// Calculate tokens per second
+Set totalTokens = stats."total_prompt_tokens" + stats."total_completion_tokens"
+Set totalSeconds = stats."total_llm_duration_ms" / 1000
+Set tokensPerSec = totalTokens / totalSeconds
+
+Write "Throughput: ", $FNUMBER(tokensPerSec, "", 1), " tokens/sec", !
+
+// Context window usage
+Set pctUsed = (stats."current_context_tokens" / stats."model_context_size") * 100
+Write "Context: ", $FNUMBER(pctUsed, "", 1), "% used", !
+```
+
 
 ### %AI.ToolMgr - Tool Registry & Policy Manager
 
@@ -581,7 +658,7 @@ The `%AI.ToolMgr` manages tool registration, discovery, and execution. It also e
 // Get all registered tools as STP-format JSON
 Set toolsJson = agent.ToolManager.%Discover()
 
-// Returns array like:
+// Returns array in the form:
 // [
 //   {"name": "get_weather", "description": "...", "parameters": {...}},
 //   {"name": "run_sql", "description": "...", "parameters": {...}}
@@ -686,11 +763,11 @@ If response.ToolCalls.%Size() > 0 {
 
 ## Building Tools
 
-Tools are ObjectScript methods that the AI can invoke. There are several ways to create tools.
+A tool is an ObjectScript method or other bit of business logic that an AI can invoke. You can create tools in several ways.
 
 ### Method 1: Simple ToolSet with Inline Tools
 
-The simplest approach is to extend `%AI.ToolSet` and define tools in an XData block.
+The simplest way to create a tool is by extending `%AI.ToolSet` and defining tools in an `XData` block:
 
 ```objectscript
 Class MyApp.SimpleTools Extends %AI.ToolSet
@@ -718,7 +795,9 @@ Class MyApp.SimpleTools Extends %AI.ToolSet
 }
 ```
 
-**Using the ToolSet:**
+**Using the ToolSet**
+
+You can then provide the tools to an instance of `%AI.Agent`. This example gives the agent `MyApp.SimpleTools`, which the agent can use to respond to the user's query:
 
 ```objectscript
 Set agent = ##class(%AI.Agent).%New(provider)
@@ -761,9 +840,7 @@ are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean
 
 ### Method 3: Wrapping Existing Classes
 
-ToolSets can expose methods from existing classes — including methods whose documentation
-is written for developers rather than for an LLM. Use `<Description/>` to provide a
-clean replacement:
+You can also give your agent access to existing ObjectScript classes as tools. This includes methods whose documentation is written for developers rather than an LLM; you can use `<Description/>` to replace the description with an LLM-friendly one:
 
 ```objectscript
 Class MyApp.DataTools Extends %AI.ToolSet
@@ -800,10 +877,8 @@ Class MyApp.DataTools Extends %AI.ToolSet
 
 ### Tool Descriptions
 
-The LLM reads two kinds of description from each tool: the **tool description** (what the
-tool does and when to call it) and **per-parameter descriptions** (what each argument
-means). Understanding where each comes from helps you choose the most natural way to
-document your tools.
+The LLM reads two kinds of description from each tool: the **tool description** (what the tool does and when to call it) and **per-parameter descriptions** (what each argument means). Understanding where each comes from helps you choose the most natural way to document your tools.
+
 
 #### Tool description
 
@@ -814,10 +889,8 @@ Resolved in priority order:
 | 1 | XML `<Description/>` | Wrapping internal methods; any time the method doc is not suitable for an LLM audience |
 | 2 | Method doc comment (`///`) | Methods written specifically as tools, where the doc comment is already LLM-friendly |
 
-`<Description/>` is a complete replacement — it discards the method doc entirely for LLM
-purposes. Without it, the method's `///` comment is used verbatim, so write it with the
-LLM in mind: what does this tool do, what does it return, and when should the model
-call it?
+`<Description/>` completely replaces the description, discarding the method documentation entirely. Without it, the method's `///` comment is used verbatim, so write it with the LLM in mind: what does this tool do, what does it return, and when should the model call it?
+
 
 #### Parameter descriptions
 
@@ -825,8 +898,7 @@ There are two ways to document parameters, and they can be combined freely:
 
 **1. In the tool description (most natural)**
 
-Document parameters as part of the method doc comment or `<Description/>`. The LLM reads
-the full tool description and understands parameter meaning from it:
+Document parameters as part of the method doc comment or `<Description/>`. The LLM reads the full tool description and understands parameter meaning from it:
 
 ```objectscript
 /// Calculate the result of a simple arithmetic expression.
@@ -836,8 +908,7 @@ Method Calculate(a As %Numeric, op As %String, b As %Numeric) As %String { ... }
 
 **2. Via `DESCRIPTION` type parameters (structured)**
 
-Attach a description directly to each formal argument. This populates the per-parameter
-`description` field in the JSON Schema, separate from the tool description:
+Attach a description directly to each formal argument. This populates the per-parameter `description` field in the JSON Schema, separate from the tool description:
 
 ```objectscript
 /// Calculate the result of a simple arithmetic expression.
@@ -848,20 +919,13 @@ Method Calculate(
 ) As %String { ... }
 ```
 
-Both approaches are effective — the LLM sees the tool description and the parameter
-schema, and draws on both. Documenting in the method doc is more natural for most
-developers. `DESCRIPTION` type parameters are more structured and explicitly annotate the
-schema, but the syntax is verbose. Use whichever fits your style; mixing them is fine.
+Both approaches are effective — the LLM sees the tool description and the parameter schema, and draws on both. Documenting in the method doc is more natural for most developers. `DESCRIPTION` type parameters are more structured and explicitly annotate the schema, but the syntax is verbose. Use whichever fits your style; mixing them is fine.
 
-> **These two sources do not interact.** The method doc comment (or `<Description/>`)
-> drives the tool-level description string. `DESCRIPTION` type parameters populate
-> per-parameter schema fields. Neither affects the other.
+> **These two sources do not interact.** The method doc comment (or `<Description/>`) drives the tool-level description string. `DESCRIPTION` type parameters populate per-parameter schema fields. Neither affects the other.
 
 ### Parameter Types and JSON Schema
 
-The JSON Schema sent to the LLM for each tool parameter is derived automatically from the
-ObjectScript type declared in the method signature. This applies to both tool parameters
-and return types.
+The JSON Schema sent to the LLM for each tool parameter is derived automatically from the ObjectScript type declared in the method signature. This applies to both tool parameters and return types.
 
 #### Primitive types
 
@@ -881,8 +945,7 @@ and return types.
 
 #### Class types
 
-When a parameter is typed to a concrete ObjectScript class (persistent, serial, or
-registered), the schema is built automatically from its compiled properties:
+When a parameter is typed to a concrete ObjectScript class (persistent, serial, or registered), the schema is built automatically from its compiled properties:
 
 ```objectscript
 Class MyApp.Address Extends %RegisteredObject
@@ -909,13 +972,11 @@ The LLM sees `address` as:
 }
 ```
 
-Properties are reflected recursively — nested objects work automatically. Circular
-references are detected and short-circuit to `{"type": "object"}` rather than looping.
+Properties are reflected recursively — nested objects work automatically. Circular references are detected and short-circuit to `{"type": "object"}` rather than looping.
 
 #### %JSON.Adaptor classes
 
-If the parameter class extends `%JSON.Adaptor`, the schema respects its JSON
-configuration:
+If the parameter class extends `%JSON.Adaptor`, the schema respects its JSON configuration:
 
 - **`%JSONFIELDNAME`** — the schema uses the remapped field name, not the property name
 - **`%JSONINCLUDE = "none"` or `"outputonly"`** — the property is excluded from the schema
@@ -942,9 +1003,7 @@ Collection properties on class types map naturally:
 - `list of ClassName` → `{"type": "array", "items": { ...schema... }}`
 - `array of ClassName` → `{"type": "object", "additionalProperties": { ...schema... }}`
 
-For `%DynamicArray` parameters, add an `ELEMENTTYPE` type parameter to tell the framework
-what the array contains. Without it the schema is just `{"type": "array"}`; with it the
-element structure is included:
+For `%DynamicArray` parameters, add an `ELEMENTTYPE` type parameter to tell the framework what the array contains. Without it the schema is just `{"type": "array"}`; with it the element structure is included:
 
 ```objectscript
 Method PlaceOrder(
@@ -953,21 +1012,16 @@ Method PlaceOrder(
 ) As %String { ... }
 ```
 
-`ELEMENTTYPE` is a schema hint only — it does not affect how the array value is passed to
-the method at runtime.
+`ELEMENTTYPE` is a schema hint only — it does not affect how the array value is passed to the method at runtime.
 
-> **Note:** Full class-type schema generation applies to plain `%AI.Tool` subclasses
-> (auto-discovered method tools). Tools declared in a ToolSet XML `<Tool/>` element use a
-> simplified schema (string/number/boolean only), since the ToolSet compiler does not have
-> visibility into the class hierarchy at compile time. For tools with complex object
-> parameters, prefer a plain `%AI.Tool` subclass.
+> **Note:** Full class-type schema generation applies to plain `%AI.Tool` subclasses (auto-discovered method tools). Tools declared in a ToolSet XML `<Tool/>` element use a simplified schema (string/number/boolean only), since the ToolSet compiler does not have visibility into the class hierarchy at compile time. For tools with complex object parameters, prefer a plain `%AI.Tool` subclass.
 
 
 ### Method 4: Use Built-in Tools
 
 The framework provides built-in tools including a generic `%AI.Tools.SQL`.
 
-**Using SQL Tools:**
+The following example specifies `%AI.Tools.SQL` in the class definition:
 
 ```objectscript
 // Include SQL tools in your ToolSet
@@ -985,7 +1039,7 @@ Class MyApp.MyTools Extends %AI.ToolSet
 }
 ```
 
-Or use directly:
+You can also provide `%AI.Tools.SQL` to an agent directly:
 
 ```objectscript
 Do agent.UseToolSet("%AI.Tools.SQL")
@@ -996,6 +1050,15 @@ Do agent.UseToolSet("%AI.Tools.SQL")
 ToolSets are collections of tools organized by domain or functionality. They support composition, filtering, and integration with external services.
 
 ### ToolSet Structure
+
+Concretely, a ToolSet is an instance of `%AI.Toolset`. Custom ToolSets extend this superclass and have the following structure:
+1. Inline tools
+2. Included ToolSets
+3. Included ToolSets with filtering
+4. MCP server (external tools)
+
+All of the above are demonstrated in the following example:
+
 
 ```objectscript
 Class MyApp.CompleteExample Extends %AI.ToolSet
@@ -1044,7 +1107,7 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
 
 ### Including Other ToolSets
 
-Compose ToolSets by including other ToolSets:
+Compose ToolSets by including other ToolSets. When you include a ToolSet, you can specify `Requirement`s, which are metadata passed to the included ToolSet used to customize its behavior.
 
 ```xml
 <Include Class="%AI.Tools.SQL">
@@ -1053,11 +1116,9 @@ Compose ToolSets by including other ToolSets:
 </Include>
 ```
 
-**Requirements** are metadata passed to the included ToolSet. The included ToolSet can use these to customize behavior.
-
 ### Filtering Tools
 
-Control which tools from an included ToolSet are exposed:
+You can explicitly include or exclude certain tools from your ToolSet with a `Filter`:
 
 ```xml
 <Include Class="%AI.Tools.FileSystem">
@@ -1077,14 +1138,10 @@ Control which tools from an included ToolSet are exposed:
 
 :warning: In a forthcoming update, this capability will switch to use stored MCP configurations using the IRIS Config Store.
 
-A `<MCP>` element inside a ToolSet definition connects your agent to an
-external MCP server and makes its tools available alongside your own. The
-agent treats MCP tools exactly like any other tool — policy enforcement,
-filtering, and tool composition all apply normally.
+A `<MCP>` element inside a ToolSet definition connects your agent to an external MCP server and makes its tools available alongside your own. The agent treats MCP tools exactly like any other tool; policy enforcement, filtering, and tool composition all apply normally.
 
 This section covers consuming external MCP servers from within a ToolSet.
-To expose your own IRIS tools as an MCP server (for use by Claude Desktop or
-other MCP clients), see [Exposing IRIS Tools via iris-mcp-server](MCP_Server_Guide.md).
+To expose your own InterSystems IRIS tools as an MCP server (for use by Claude Desktop or other MCP clients), see [Exposing IRIS Tools via iris-mcp-server](MCP_Server_Guide.md).
 
 **Stdio MCP Server:**
 
@@ -1134,10 +1191,9 @@ other MCP clients), see [Exposing IRIS Tools via iris-mcp-server](MCP_Server_Gui
 
 **Platform-specific Stdio entries:**
 
-When the same toolset is deployed on multiple operating systems, use the
-`Platform` attribute to select the correct executable per platform. The value
-is a regex matched against a platform descriptor string built at runtime with
-the form `"<os> <version> <arch>"`. Examples:
+When the same toolset is deployed on multiple operating systems, use the `Platform` attribute to select the correct executable per platform. The value is a regex matched against a platform descriptor string built at runtime with the form `"<os> <version> <arch>"`.
+
+Examples:
 
 | Platform | Descriptor string |
 |---|---|
@@ -1146,8 +1202,7 @@ the form `"<os> <version> <arch>"`. Examples:
 | macOS Sonoma ARM | `macos 14.5.0 aarch64` |
 | macOS Sonoma Intel | `macos 14.5.0 x86_64` |
 
-The first `<Stdio>` element whose `Platform` regex matches wins; an element
-with no `Platform` attribute is a catch-all fallback.
+The first `<Stdio>` element whose `Platform` regex matches wins; an element with no `Platform` attribute is a catch-all fallback.
 
 ```xml
 <MCP Name="MyServer">
@@ -1173,15 +1228,13 @@ More specific matches — pin to an OS version or require both OS and arch:
 </MCP>
 ```
 
-The `Platform` attribute works the same way on `<Remote>` elements, allowing
-different URLs or auth schemes per platform.
+The `Platform` attribute works the same way on `<Remote>` elements, allowing different URLs or auth schemes per platform.
 
 ### Configuration Variables
 
 :warning: In a forthcoming update, this capability will switch to use stored credentials using the IRIS Config Store.
 
-Use `@{prefix.key}` placeholders to pull values from external sources at runtime.
-Two prefixes are available by default:
+Use `@{prefix.key}` placeholders to pull values from external sources at runtime. Two prefixes are available by default:
 
 | Prefix | Source | Example |
 |---|---|---|
@@ -1213,16 +1266,11 @@ Do ##class(%Wallet.KeyValue).Create("AISecrets.ExternalAPIKey", {
 Do ##class(%AI.Utils.SettingStore).RegisterDefaults()
 ```
 
-Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax
-works everywhere in the framework: ToolSet config, provider settings, and
-agent system prompts.
+Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax works everywhere in the framework: ToolSet config, provider settings, and agent system prompts.
 
-### Exposing IRIS Tools via iris-mcp-server
+### Exposing IRIS Tools via `iris-mcp-server`
 
-iris-mcp-server is a standalone Rust process that bridges LLM clients (Claude
-Desktop, Python MCP clients, etc.) to IRIS tools over the wgproto protocol.
-It uses two independent authentication layers: one for the wgproto transport
-connection and one for per-request CSP application identity.
+`iris-mcp-server` is a standalone Rust process that bridges LLM clients (Claude Desktop, Python MCP clients, etc.) to IRIS tools over the wgproto protocol. It uses two independent authentication layers: one for the `wgproto` transport connection and one for per-request CSP application identity.
 
 See [`MCP_Server_Guide.md`](MCP_Server_Guide.md) for full configuration and authentication details.
 
@@ -1473,31 +1521,11 @@ Try {
 }
 ```
 
-### Performance Monitoring
-
-:warning: advanced / experimental feature -- this capability may change significantly before GA release
-
-```objectscript
-// Track session performance
-Set stats = session.GetStats()
-
-// Calculate tokens per second
-Set totalTokens = stats."total_prompt_tokens" + stats."total_completion_tokens"
-Set totalSeconds = stats."total_llm_duration_ms" / 1000
-Set tokensPerSec = totalTokens / totalSeconds
-
-Write "Throughput: ", $FNUMBER(tokensPerSec, "", 1), " tokens/sec", !
-
-// Context window usage
-Set pctUsed = (stats."current_context_tokens" / stats."model_context_size") * 100
-Write "Context: ", $FNUMBER(pctUsed, "", 1), "% used", !
-```
-
 ### Prompt Caching
 
 :warning: advanced / experimental feature -- this capability may change significantly before GA release
 
-Reduce costs by caching portions of input context. Supported by Anthropic, OpenAI (automatic), Gemini (planned).
+You can reduce costs by caching portions of input context. This is supported by various providers, including Anthropic, OpenAI (automatic), and Gemini (automatic):
 
 ```objectscript
 ClassMethod DemoCaching()
@@ -1529,8 +1557,6 @@ ClassMethod DemoCaching()
     Write "Cache reads: ", response2.Usage.CacheReadTokens, " tokens", !
 }
 ```
-
-**Cache TTL:** 5 minutes (Anthropic), 5-10 minutes (OpenAI)
 
 ## Best Practices
 
@@ -1592,7 +1618,7 @@ Method NewConversation()
 
 ### 5. Resource Cleanup
 
-IRIS automatically cleans up when objects go out of scope, but for long-running processes:
+InterSystems IRIS automatically cleans up when objects go out of scope, but for long-running processes, you should call `%Close()`:
 
 ```objectscript
 // Explicit cleanup
@@ -1638,39 +1664,39 @@ Try {
 
 ### Tools Not Executing
 
-1. Check tool registration:
-```objectscript
-Set tools = agent.ToolManager.%Discover()
-Do tools.%ToJSON()  // Should show your tools
-```
+1. Verify that the tools are registered:
+    ```objectscript
+    Set tools = agent.ToolManager.%Discover()
+    Do tools.%ToJSON()  // Should show your tools
+    ```
 
 2. Enable debug logging:
-```objectscript
-Do ##class(%AI.System).SetLogLevel("debug")
-```
+    ```objectscript
+    Do ##class(%AI.System).SetLogLevel("debug")
+    ```
 
-3. Check for authorization denials in audit logs
+3. Check for authorization denials in audit logs.
 
 ### Streaming Issues
 
 1. Verify callback method signature:
-```objectscript
-Method OnChunk(chunk As %String)
-```
+    ```objectscript
+    Method OnChunk(chunk As %String)
+    ```
 
-2. Check that model supports streaming
+2. Verify that model supports streaming
 
 3. Ensure callback object is not garbage collected
 
 ### High Token Usage
 
 1. Monitor context size:
-```objectscript
-Set stats = session.GetStats()
-If stats."current_context_tokens" > (stats."model_context_size" * 0.8) {
-    // Context is getting full - consider resetting
-    Write "Warning: Context usage at ", stats."current_context_tokens", " tokens", !
-}
-```
+    ```objectscript
+    Set stats = session.GetStats()
+    If stats."current_context_tokens" > (stats."model_context_size" * 0.8) {
+        // Context is getting full - consider resetting
+        Write "Warning: Context usage at ", stats."current_context_tokens", " tokens", !
+    }
+    ```
 
-2. Reset sessions periodically for long conversations
+2. Reset sessions periodically for long conversations.

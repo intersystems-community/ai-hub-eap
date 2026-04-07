@@ -9,20 +9,19 @@ This document describes comprehensive examples demonstrating the InterSystems AI
 
 ```
 objectscript/
-├── cls/
-│   └── Sample/
-│       ├── AI/
-│       │   ├── Tools/          # Sample tool implementations
-│       │   ├── ToolSet/        # Sample toolset definitions
-│       │   ├── Policies/       # Sample policy implementations
-│       │   ├── Agent/          # Sample agent subclasses
-│       │   ├── Proglang/       # Programming language advisor example
-│       │   ├── Skill/          # Sample skill definitions
-│       │   └── Examples/       # Complete usage examples
-│       └── MCP/
-│           └── Service/        # Sample MCP service implementations
-├── USER_GUIDE.md              # Complete user guide
-└── README.md                  # This file
+└── cls/
+    └── Sample/
+        ├── AI/
+        │   ├── Agent/          # Sample agent subclasses
+        │   ├── Examples/       # Complete usage examples
+        │   ├── Orders/         # Additional usage examples
+        │   ├── Policies/       # Sample policy implementations
+        │   ├── Proglang/       # Programming language advisor example
+        │   ├── Skill/          # Sample skill definitions
+        │   ├── Tools/          # Sample tool implementations
+        │   └── ToolSet/        # Sample toolset definitions
+        └── MCP/
+            └── Service/        # Sample MCP service implementations
 ```
 
 ## Examples
@@ -208,7 +207,7 @@ Do agent.ToolManager.SetAuthPolicy(policy)
 
 ## Prerequisites
 
-1. IRIS installation with AI Hub included
+1. InterSystems IRIS installation with AI Hub included
 2. API keys for providers (set as environment variables):
    - `OPENAI_API_KEY` for OpenAI
    - `ANTHROPIC_API_KEY` for Anthropic
@@ -219,7 +218,7 @@ Do agent.ToolManager.SetAuthPolicy(policy)
 ### Import the Package
 
 ```objectscript
-Do $system.OBJ.LoadDir("path/to/examples/objectscript/cls", "ck")
+Do $system.OBJ.Import("path/to/examples/objectscript/cls", "ck")
 ```
 
 ### Run an Example

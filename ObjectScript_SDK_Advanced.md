@@ -12,9 +12,9 @@ Policies provide governance over tool execution.
 
 ### Authorization Policies
 
-Control which tools can execute and modify tool calls before execution.
+Authorization policies let you restrict how tools are run and by whom.
 
-**Base Class:**
+The `%AI.Policy.Authorization` base class provides the `%CanExecute()` method, which should be implemented by its subclasses:
 
 ```objectscript
 Class %AI.Policy.Authorization Extends %RegisteredObject [ Abstract ]
@@ -30,6 +30,8 @@ Class %AI.Policy.Authorization Extends %RegisteredObject [ Abstract ]
 ```
 
 **Example: Read-Only Policy**
+
+In this example, `MyApp.ReadOnlyPolicy` implements a read-only policy with an implementation of the `%CanExecute()` method, which prevents callers from using write operations:
 
 ```objectscript
 Class MyApp.ReadOnlyPolicy Extends %AI.Policy.Authorization
@@ -52,6 +54,8 @@ Class MyApp.ReadOnlyPolicy Extends %AI.Policy.Authorization
 ```
 
 **Example: Parameter Modification Policy**
+
+In this example, `MyApp.PathSanitizerPolicy` defines a set of whitelisted paths upon instantiation, and its implementation of `%CanExecute()` enforces that whitelist:
 
 ```objectscript
 Class MyApp.PathSanitizerPolicy Extends %AI.Policy.Authorization
@@ -92,7 +96,9 @@ Class MyApp.PathSanitizerPolicy Extends %AI.Policy.Authorization
 }
 ```
 
-**Attaching Authorization Policies:**
+**Attaching Authorization Policies**
+
+After you define an authorization policy class, you can attach it to a `ToolManager` with `SetAuthPolicy()`:
 
 ```objectscript
 // Single policy
@@ -106,9 +112,7 @@ Do agent.ToolManager.SetAuthPolicy(policy)
 
 ### Audit Policies
 
-Track and log tool executions.
-
-**Base Class:**
+Audit policies track and log tool executions. The `%AI.Policy.Audit` base class provides the `%LogExecution()` method, which should be implemented by its subclasses:
 
 ```objectscript
 Class %AI.Policy.Audit Extends %RegisteredObject [ Abstract ]
@@ -126,6 +130,8 @@ Class %AI.Policy.Audit Extends %RegisteredObject [ Abstract ]
 ```
 
 **Example: Database Audit Log**
+
+In this example, each entry in the audit log is represented by an instance of `MyApp.ToolAuditLog`. `MyApp.DatabaseAudit` implements the `%LogExecution()` method to create instances of `MyApp.ToolAuditLog` and record details of the tool execution to its properties:
 
 ```objectscript
 Class MyApp.DatabaseAudit Extends %AI.Policy.Audit
@@ -153,6 +159,8 @@ Class MyApp.DatabaseAudit Extends %AI.Policy.Audit
 ```
 
 **Example: Metrics Collector**
+
+In this example, `MyApp.MetricsAudit` tracks various tool execution metrics in its properties, and implements the `%LogExecution()` method to update those metrics:
 
 ```objectscript
 Class MyApp.MetricsAudit Extends %AI.Policy.Audit
@@ -214,18 +222,79 @@ Class MyApp.MetricsAudit Extends %AI.Policy.Audit
 
 **Attaching Audit Policies:**
 
+After you define an audit policy class, you can attach it to a `ToolManager` with `SetAuditPolicy()`:
+
 ```objectscript
 Do agent.ToolManager.SetAuditPolicy(##class(MyApp.DatabaseAudit).%New())
 ```
 
 ### Policy Composition
 
-IRIS AI Hub supports **Policy Composition**, allowing policies to be defined at two levels:
+InterSystems AI Hub supports **Policy Composition**, which allows policies to be defined at two levels:
 
 1. **Global Policies** - Attached to the ToolManager, apply to all tools
 2. **ToolSet Policies** - Defined in ToolSet XML, apply only to that ToolSet's tools
 
 This enables layered governance where organization-wide policies (global) combine with tool-specific policies (ToolSet).
+
+
+Policy classes must:
+1. Extend the appropriate base class (`%AI.Policy.Authorization`, `%AI.Policy.Audit`, or `%AI.Policy.Discovery`)
+2. Extend `%XML.Adaptor` for automatic XML deserialization
+3. Use `XMLPROJECTION = "ELEMENT"` or `"ATTRIBUTE"` for properties
+4. Implement required policy methods
+
+#### Benefits of Policy Composition
+
+1. **Separation of Concerns**: Organization-wide policies (global) separate from tool-specific policies (ToolSet)
+2. **Declarative Configuration**: Policies configured in XML alongside tool definitions
+3. **Reusable Policy Classes**: Same policy class can be used across multiple ToolSets with different configurations
+4. **Type Safety**: XML framework provides type-safe property mapping
+5. **Automatic Instantiation**: No manual policy creation required
+6. **Layered Security**: Defense in depth with multiple policy layers
+
+#### How Policy Composition Works
+
+At compile time:
+1. The ToolSet compiler parses the `<Policies>` block from the XML definition
+2. Extracts the `Class` attribute from each policy element
+3. Generates a `%OnNew()` method that deserializes the policy XML using `%XML.Reader.Correlate()`
+4. Instantiates policy objects and stores them in ToolSet properties
+
+At runtime:
+1. When the ToolSet is registered with ToolManager, its policies are passed to the Rust layer
+2. The Rust ToolManager stores both global and ToolSet-level policies
+3. During tool execution, policies are applied in sequence
+
+#### Policy Composition Rules
+
+| Policy Type | Execution Order | Composition Logic |
+|-------------|-----------------|-------------------|
+| **Authorization** | 1. Global<br/>2. ToolSet | Both must allow (AND) |
+| **Audit** | 1. Global<br/>2. ToolSet | Both used (Union) |
+| **Discovery** | 1. ToolSet<br/>2. Global (fallback) | ToolSet overrides |
+
+**Authorization Example**
+```
+Tool Call: ReadFile(path="/etc/passwd")
+    ↓
+Global Auth Policy: Check user role → Allow
+    ↓
+ToolSet Auth Policy: Check path is in allowed list → Deny (not in /data or /tmp)
+    ↓
+Result: DENIED (ToolSet policy blocked it)
+```
+
+**Audit Example**
+```
+Tool Call: ReadFile(path="/data/report.txt") → Success
+    ↓
+Global Audit Policy: Log to central database
+    ↓ (parallel)
+ToolSet Audit Policy: Log to file-specific log
+    ↓
+Result: Both logs written independently
+```
 
 #### Defining ToolSet-Level Policies
 
@@ -283,14 +352,6 @@ Class MyApp.SecureFileTools Extends %AI.ToolSet
 }
 ```
 
-**Policy Class Requirements:**
-
-Policy classes must:
-1. Extend the appropriate base class (`%AI.Policy.Authorization`, `%AI.Policy.Audit`, or `%AI.Policy.Discovery`)
-2. Extend `%XML.Adaptor` for automatic XML deserialization
-3. Use `XMLPROJECTION = "ELEMENT"` or `"ATTRIBUTE"` for properties
-4. Implement required policy methods
-
 **Example XML-Enabled Policy:**
 
 ```objectscript
@@ -338,58 +399,6 @@ Class MyApp.PathSanitizerPolicy Extends (%AI.Policy.Authorization, %XML.Adaptor)
 }
 ```
 
-#### How Policy Composition Works
-
-**At Compile Time:**
-1. The ToolSet compiler parses the `<Policies>` block from the XML definition
-2. Extracts the `Class` attribute from each policy element
-3. Generates a `%OnNew()` method that deserializes the policy XML using `%XML.Reader.Correlate()`
-4. Instantiates policy objects and stores them in ToolSet properties
-
-**At Runtime:**
-1. When the ToolSet is registered with ToolManager, its policies are passed to the Rust layer
-2. The Rust ToolManager stores both global and ToolSet-level policies
-3. During tool execution, policies are applied in sequence
-
-**Composition Rules:**
-
-| Policy Type | Execution Order | Composition Logic |
-|-------------|-----------------|-------------------|
-| **Authorization** | 1. Global<br/>2. ToolSet | Both must allow (AND) |
-| **Audit** | 1. Global<br/>2. ToolSet | Both fire (Union) |
-| **Discovery** | 1. ToolSet<br/>2. Global (fallback) | ToolSet overrides |
-
-**Authorization Example:**
-```
-Tool Call: ReadFile(path="/etc/passwd")
-    ↓
-Global Auth Policy: Check user role → Allow
-    ↓
-ToolSet Auth Policy: Check path is in allowed list → Deny (not in /data or /tmp)
-    ↓
-Result: DENIED (ToolSet policy blocked it)
-```
-
-**Audit Example:**
-```
-Tool Call: ReadFile(path="/data/report.txt") → Success
-    ↓
-Global Audit Policy: Log to central database
-    ↓ (parallel)
-ToolSet Audit Policy: Log to file-specific log
-    ↓
-Result: Both logs written independently
-```
-
-#### Benefits of Policy Composition
-
-1. **Separation of Concerns**: Organization-wide policies (global) separate from tool-specific policies (ToolSet)
-2. **Declarative Configuration**: Policies configured in XML alongside tool definitions
-3. **Reusable Policy Classes**: Same policy class can be used across multiple ToolSets with different configurations
-4. **Type Safety**: XML framework provides type-safe property mapping
-5. **Automatic Instantiation**: No manual policy creation required
-6. **Layered Security**: Defense in depth with multiple policy layers
-
 #### Example: Combining Global and ToolSet Policies
 
 ```objectscript
@@ -422,22 +431,49 @@ Do agent.UseToolSet("MyApp.SecureFileTools")
 
 ## Nested Agents (RLM Pattern)
 
-The **Recursive Language Model (RLM)** pattern enables hierarchical task decomposition where parent agents spawn sub-agents to handle specialized subtasks. This is useful for breaking down complex tasks into manageable pieces with focused attention.
+The **Recursive Language Model (RLM)** pattern lets parent agents break down tasks hierarchically and delegate tasks to specialized sub-agents.
 
-### What is RLM?
+While spawned by the parent agent, the sub-agent acts independently with hits own system prompt, model, and conversation context. Sub-agent can even spawn their own sub-agents for further delegation.
 
-RLM is a pattern where:
-- **Parent agents** break down complex tasks and coordinate work
-- **Sub-agents** handle specific subtasks with specialized instructions
-- **Nested execution** allows multiple levels of delegation (parent → sub → sub-sub)
+#### Use Cases
 
-Each sub-agent is an independent agent with its own system prompt, model, and conversation context.
+**1. Complex Task Decomposition**
+- Break large tasks into manageable subtasks
+- "Design a complete system" → delegate to API designer, data modeler, security specialist
+
+**2. Specialized Processing**
+- Route subtasks to agents with specific expertise
+- Code review → "code reviewer" sub-agent
+- Technical writing → "technical writer" sub-agent
+- Data analysis → "data analyst" sub-agent
+
+**3. Hierarchical Workflows**
+- Multi-level delegation for complex projects
+- Project Manager → Technical Leads → Individual Contributors
+
+**4. Parallel Processing (Conceptual)**
+- Delegate independent tasks to separate sub-agents
+- Tasks are executed sequentially but represent logically parallel concerns
+
+#### Performance Considerations
+
+- **Cost**: Each sub-agent is a separate LLM call (API cost multiplies)
+- **Latency**: Nested calls are sequential
+- **Depth**: Deeper nesting = higher cost and latency
+- **Trade-off**: Better task decomposition vs. execution time
+
+**Best Practices:**
+1. Use delegation strategically - not all tasks need sub-agents
+2. Keep nesting shallow - 2-3 levels max in most cases
+3. Use smaller/cheaper models for sub-agents when appropriate (gpt-4o-mini, claude-haiku)
+4. Give sub-agents focused, specific roles and instructions
+5. Monitor costs - deep delegation can be expensive
 
 ### Creating Sub-Agents
 
 **Method 1: Using the DelegateTask Tool**
 
-The `Sample.AI.Tools.DelegateTask` tool allows the LLM to create sub-agents dynamically:
+The `Sample.AI.Tools.DelegateTask` tool instructs the agent to create sub-agents dynamically:
 
 ```objectscript
 // Create parent agent with delegation capability
@@ -461,7 +497,7 @@ Set response = agent.Chat(session, task)
 
 **Method 2: Programmatic Sub-Agent Creation**
 
-Create sub-agents directly in your code:
+To create sub-agents directly in your code:
 
 ```objectscript
 // Create parent agent
@@ -541,49 +577,15 @@ Do ##class(Sample.AI.Examples.NestedAgents).DeepDelegation()
 Do ##class(Sample.AI.Examples.NestedAgents).DirectSubagentCreation()
 ```
 
-### Use Cases
-
-**1. Complex Task Decomposition**
-- Break large tasks into manageable subtasks
-- "Design a complete system" → delegate to API designer, data modeler, security specialist
-
-**2. Specialized Processing**
-- Route subtasks to agents with specific expertise
-- Code review → "code reviewer" sub-agent
-- Technical writing → "technical writer" sub-agent
-- Data analysis → "data analyst" sub-agent
-
-**3. Hierarchical Workflows**
-- Multi-level delegation for complex projects
-- Project Manager → Technical Leads → Individual Contributors
-
-**4. Parallel Processing (Conceptual)**
-- Delegate independent tasks to separate sub-agents
-- Tasks are executed sequentially but represent logically parallel concerns
-
-### Performance Considerations
-
-- **Cost**: Each sub-agent is a separate LLM call (API cost multiplies)
-- **Latency**: Nested calls are sequential
-- **Depth**: Deeper nesting = higher cost and latency
-- **Trade-off**: Better task decomposition vs. execution time
-
-**Best Practices:**
-1. Use delegation strategically - not all tasks need sub-agents
-2. Keep nesting shallow - 2-3 levels max in most cases
-3. Use smaller/cheaper models for sub-agents when appropriate (gpt-4o-mini, claude-haiku)
-4. Give sub-agents focused, specific roles and instructions
-5. Monitor costs - deep delegation can be expensive
-
 ### Troubleshooting
 
-**Sub-agent not receiving context:**
-- Sub-agents are **independent** - they don't automatically inherit parent session context
-- Pass context via the `context` parameter in DelegateTask
-- Or include necessary context in the delegated task description
+**Sub-agent not receiving context**
+This is expected behavior; each sub-agent is **independent** and therefore doesn't automatically inherit the parent agent's session context. If you need sub-agents to access this context, you can do one of the following:
+- Pass context via the `context` parameter in `DelegateTask()`
+- Include necessary context in the delegated task description
 
-**High costs:**
-- Deep delegation or many parallel delegations multiply API costs
+**High API costs**
+Deep delegation or many parallel delegations multiply API costs. To mitigate this:
 - Use smaller models for sub-agents (gpt-4o-mini, claude-haiku)
 - Limit delegation depth
 - Cache results when possible
@@ -717,11 +719,11 @@ Use `%AI.SubAgent` for simple programmatic sub-agents. Use `%AI.Skill` when you 
 
 ## RAG (Retrieval-Augmented Generation)
 
-RAG lets an AI agent retrieve relevant passages from a knowledge base before generating
-a response. Rather than relying only on its training data, the agent first searches a
-vector store for matching chunks, then uses those chunks as context when answering.
+:warning: This area will undergo significant change in a future version
 
-The IRIS AI RAG stack consists of three objects that you build in order:
+RAG lets an AI agent retrieve relevant passages from a knowledge base before generating a response. Rather than relying only on its training data, the agent first searches a vector store for matching chunks, then uses those chunks as context when answering.
+
+The InterSystems IRIS AI RAG stack consists of three objects that you build in order:
 
 1. **`%AI.RAG.Embedding`** — converts text to dense vectors
 2. **`%AI.RAG.VectorStore.IRIS`** — persists vectors in an IRIS SQL table
@@ -731,8 +733,7 @@ The IRIS AI RAG stack consists of three objects that you build in order:
 
 #### FastEmbed (local, no API key)
 
-`%AI.RAG.Embedding.FastEmbed` runs the AllMiniLML6V2 ONNX model entirely in-process via
-the Rust bridge. It produces 384-dimensional vectors and has no external dependencies.
+`%AI.RAG.Embedding.FastEmbed` runs the AllMiniLML6V2 ONNX model entirely in-process via the Rust bridge. It produces 384-dimensional vectors and has no external dependencies.
 
 ```objectscript
 Set emb = ##class(%AI.RAG.Embedding.FastEmbed).Create()
@@ -741,9 +742,7 @@ Set emb = ##class(%AI.RAG.Embedding.FastEmbed).Create()
 
 #### OpenAI Embeddings (API key required)
 
-`%AI.RAG.Embedding.OpenAI` reuses the credentials from an existing `%AI.Provider`
-instance. The OpenAI `/embeddings` endpoint is called by the Rust bridge — no extra
-HTTP configuration is needed.
+`%AI.RAG.Embedding.OpenAI` reuses the credentials from an existing `%AI.Provider` instance. The OpenAI `/embeddings` endpoint is called by the Rust bridge; no extra HTTP configuration is needed.
 
 ```objectscript
 Set apiKey = ##class(Sample.AI.Utils).GetAPIKey("openai")
@@ -754,8 +753,7 @@ Set emb = ##class(%AI.RAG.Embedding.OpenAI).Create(provider)
 
 #### Custom IRIS Embedding Provider
 
-Extend `%AI.RAG.Embedding` and implement `EmbedBatch()`. The method receives a
-`%DynamicArray` of strings and must return a `%DynamicArray` of float arrays.
+Extend `%AI.RAG.Embedding` and implement `EmbedBatch()`. The method receives a `%DynamicArray` of strings and must return a `%DynamicArray` of float arrays.
 
 ```objectscript
 Class MyApp.RAG.MyEmbedder Extends %AI.RAG.Embedding
@@ -801,15 +799,13 @@ Set emb = ##class(MyApp.RAG.MyEmbedder).%New()
 $$$ThrowOnError(emb.Register())
 ```
 
-> **Note:** `%AI.RAG.Embedding.FastEmbed` and `%AI.RAG.Embedding.OpenAI` call `Register()`
-> automatically. You only need to call `Register()` explicitly for custom subclasses.
+> **Note:** `%AI.RAG.Embedding.FastEmbed` and `%AI.RAG.Embedding.OpenAI` call `Register()` automatically. You only need to call `Register()` explicitly for custom subclasses.
 
 ---
 
 ### Vector Store
 
-`%AI.RAG.VectorStore.IRIS` creates and manages an IRIS SQL table. DDL runs in ObjectScript
-(`Build()`); all DML (inserts, similarity search, deletes) runs in Rust for performance.
+`%AI.RAG.VectorStore.IRIS` creates and manages an IRIS SQL table. DDL runs in ObjectScript (`Build()`); all DML (inserts, similarity search, deletes) runs in Rust for performance.
 
 #### Basic Setup
 
@@ -830,8 +826,7 @@ $$$ThrowOnError(vs.Build())
 
 #### Promoted Fields (Indexed Filtering)
 
-Promoted fields are metadata values that are copied to dedicated SQL columns so they can
-be used in indexed `WHERE` clauses during similarity search.
+Promoted fields are metadata values that are copied to dedicated SQL columns so they can be used in indexed `WHERE` clauses during similarity search.
 
 ```objectscript
 Set fields = [
@@ -846,16 +841,13 @@ Supported field types: `varchar(N)`, `integer`, `float`, `boolean`.
 
 The `source` column is always created automatically — you do not need to declare it.
 
-> **Calling `Build()` on an existing table is safe.** The SQL uses `CREATE TABLE IF NOT EXISTS`.
-> The `_Config` table check will raise an error if the model name or dimensions have changed,
-> protecting you from accidentally mixing embeddings from incompatible models.
+> **Calling `Build()` on an existing table is safe.** The SQL uses `CREATE TABLE IF NOT EXISTS`. The `_Config` table check will raise an error if the model name or dimensions have changed, protecting you from accidentally mixing embeddings from incompatible models.
 
 ---
 
 ### KnowledgeBase
 
-`%AI.RAG.KnowledgeBase` is the central object. It wires the embedding model and vector
-store together, manages document chunking, and exposes a `search_<name>` tool to agents.
+`%AI.RAG.KnowledgeBase` is the central object. It wires the embedding model and vector store together, manages document chunking, and exposes a `search_<name>` tool to agents.
 
 #### Building
 
@@ -865,8 +857,7 @@ Set kb.TopK = 5  // results returned per search (default: 5)
 $$$ThrowOnError(kb.Build(emb, vs))
 ```
 
-The first argument to `%New()` becomes the tool name (`search_docs`). The second is the
-description the LLM reads to decide when to call the tool.
+The first argument to `%New()` becomes the tool name (`search_docs`). The second is the description the LLM reads to decide when to call the tool.
 
 #### Indexing Documents
 
@@ -886,13 +877,11 @@ Set chunks = kb.AddDocuments(docs)
 Write "Indexed ", chunks, " chunks", !
 ```
 
-The `source` key in the metadata is used to assign deterministic chunk IDs of the form
-`<source>-chunk-<n>`. This is required for correct re-indexing.
+The `source` key in the metadata is used to assign deterministic chunk IDs of the form `<source>-chunk-<n>`. This is required for correct re-indexing.
 
 #### Re-indexing a Changed Document
 
-When a document's content changes, call `ReindexDocument()` to atomically replace all
-its old chunks with new ones. This avoids stale duplicates accumulating in the store.
+When a document's content changes, call `ReindexDocument()` to atomically replace all its old chunks with new ones. This avoids stale duplicates accumulating in the store.
 
 ```objectscript
 Set newText = "Updated introduction to IRIS 2025..."
