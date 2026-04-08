@@ -767,7 +767,7 @@ A tool is an ObjectScript method or other bit of business logic that an AI can i
 
 ### Method 1: Simple ToolSet with Inline Tools
 
-The simplest way to create a tool is by extending `%AI.ToolSet` and defining tools in an `XData` block:
+The simplest way to create a tool is by extending `%AI.ToolSet` and defining tools referencing class methods by name in an `XData` block:
 
 ```objectscript
 Class MyApp.SimpleTools Extends %AI.ToolSet
@@ -781,13 +781,13 @@ Class MyApp.SimpleTools Extends %AI.ToolSet
     }
 
     /// Get the current server time in ISO 8601 format.
-    Method GetTime() As %String
+    ClassMethod GetTime() As %String
     {
         Return $ZDATETIME($HOROLOG, 3)
     }
 
     /// Get the total number of registered users.
-    Method GetUserCount() As %Integer
+    ClassMethod GetUserCount() As %Integer
     {
         &sql(SELECT COUNT(*) INTO :count FROM Security.Users)
         Return count
@@ -827,16 +827,14 @@ Class MyApp.Calculator Extends %AI.ToolSet
     }
 
     /// Add two numbers (a and b) together and return the sum.
-    Method Add(a As %Float, b As %Float) As %Float
+    ClassMethod Add(a As %Float, b As %Float) As %Float
     {
         Return a + b
     }
 }
 ```
 
-Each typed parameter becomes a JSON Schema property. Parameters without a default value
-are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean`,
-`%DynamicObject`, `%DynamicArray`, and any `%JSON.Adaptor` subclass.
+Each typed parameter becomes a JSON Schema property. Parameters without a default value are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean`, `%DynamicObject`, `%DynamicArray`, and any `%JSON.Adaptor` subclass.
 
 ### Method 3: Wrapping Existing Classes
 
@@ -856,7 +854,7 @@ Class MyApp.DataTools Extends %AI.ToolSet
     }
 
     /// Internal: delegates to Patient.SearchByName, returns JSON for RPC layer.
-    Method SearchPatients(name As %String) As %String
+    ClassMethod SearchPatients(name As %String) As %String
     {
         Set results = ##class(MyApp.Patient).SearchByName(name)
 
@@ -903,7 +901,7 @@ Document parameters as part of the method doc comment or `<Description/>`. The L
 ```objectscript
 /// Calculate the result of a simple arithmetic expression.
 /// a is the left operand, op is the operator (+ - * /), b is the right operand.
-Method Calculate(a As %Numeric, op As %String, b As %Numeric) As %String { ... }
+ClassMethod Calculate(a As %Numeric, op As %String, b As %Numeric) As %String { ... }
 ```
 
 **2. Via `DESCRIPTION` type parameters (structured)**
@@ -912,7 +910,7 @@ Attach a description directly to each formal argument. This populates the per-pa
 
 ```objectscript
 /// Calculate the result of a simple arithmetic expression.
-Method Calculate(
+ClassMethod Calculate(
     a As %Numeric(DESCRIPTION = "Left operand"),
     op As %String(DESCRIPTION = "Operator: + - * /"),
     b As %Numeric(DESCRIPTION = "Right operand")
@@ -1006,7 +1004,7 @@ Collection properties on class types map naturally:
 For `%DynamicArray` parameters, add an `ELEMENTTYPE` type parameter to tell the framework what the array contains. Without it the schema is just `{"type": "array"}`; with it the element structure is included:
 
 ```objectscript
-Method PlaceOrder(
+ClassMethod PlaceOrder(
     customerId As %Integer(DESCRIPTION = "Customer ID"),
     items As %DynamicArray(ELEMENTTYPE = "MyApp.OrderItem", DESCRIPTION = "Items to order")
 ) As %String { ... }
@@ -1098,7 +1096,7 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
     }
 
     /// Echo back the input.
-    Method Echo(text As %String(DESCRIPTION = "Text to echo")) As %String
+    ClassMethod Echo(text As %String(DESCRIPTION = "Text to echo")) As %String
     {
         Return "Echo: " _ text
     }
