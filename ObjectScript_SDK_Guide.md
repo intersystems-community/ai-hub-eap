@@ -12,10 +12,10 @@
     - [Architecture](#architecture)
   - [Getting Started: API Key Setup](#getting-started-api-key-setup)
     - [Current method: Environment Variables (Requires IRIS Restart)](#current-method-environment-variables-requires-iris-restart)
-    - [Verifying API Key Setup](#verifying-api-key-setup)
+    - [Config Store Support](#config-store-support)
   - [Core Components](#core-components)
-    - [%AI.Provider - LLM Provider Interface](#aiprovider---llm-provider-interface)
-    - [%AI.Agent - Execution Engine](#aiagent---execution-engine)
+    - [`%AI.Provider` - LLM Provider Interface](#aiprovider---llm-provider-interface)
+    - [`%AI.Agent` - Execution Engine](#aiagent---execution-engine)
       - [Creating an Agent](#creating-an-agent)
       - [Configuring the Model](#configuring-the-model)
       - [Declarative Agent Configuration](#declarative-agent-configuration)
@@ -145,7 +145,7 @@ The InterSystems AI Hub bridges the gap between ObjectScript applications and mo
 Before using any LLMs, you need to configure API keys for your LLM provider. 
 The AI Hub uses the IRIS Wallet to store credentials, through a new facility called the IRIS Config Store.
 
-:warning: The IRIS Config Store is still a work in progress. In the current version of the AI Hub, you can still use simple environment variables to pass API keys.
+:warning: Full support for the [IRIS Config Store](Config_Store_Guide.md) is still a work in progress. In the current version of the AI Hub, you can still use simple environment variables to pass API keys.
 
 ### Current method: Environment Variables (Requires IRIS Restart)
 
@@ -175,8 +175,6 @@ The standard approach is to set environment variables which can then be retrieve
 
 **Important:** IRIS must be restarted after setting environment variables for them to be visible to the IRIS process.
 
-### Verifying API Key Setup
-
 You can verify whether InterSystems IRIS can see your API key using `SYSTEM.Util.GetEnviron()`:
 
 ```objectscript
@@ -193,9 +191,62 @@ USER> Write provider.Name
 openai
 ```
 
+### Config Store Support
+
+Support for the IRIS Config Store is still a WIP, but the following trick with the `OnInit()` callback can get you going for Agents and Providers:
+
+```objectscript
+Class Demo.MyAgent Extends %AI.Agent
+{
+
+/* ... */
+
+Parameter MODELCONFIGNAME = "MyConfigName";
+
+Method %OnInit() As %Status
+{
+    set sc = $$$OK
+    try {
+
+        if ..Provider="" && ..#MODELCONFIGNAME'="" {
+            set sc = ..GetProviderForConfig(..#MODELCONFIGNAME, .provider, .model)
+            quit:$$$ISERR(sc)
+            set ..Provider = provider
+            set ..Model = model
+        }
+
+    } catch (ex) {
+        set sc = ex.AsStatus()
+    }
+    return sc
+}
+
+/// This method will be subsumed by %AI.Provider updates
+ClassMethod GetProviderForConfig(configName as %String, Output provider As %AI.Provider, Output model as %String) as %Status [ Internal]
+{
+    set sc = $$$OK
+    try {
+        set sc = ##class(%ConfigStore.Configuration).GetDetails("AI.LLM."_configName, .details, 0, 1)
+        quit:$$$ISERR(sc)
+
+        set provider = ##class(%AI.Provider).Create(details."model_provider", details)
+
+        set model = details."model"
+
+    } catch (ex) {
+        set sc = ex.AsStatus()
+    }
+    quit sc
+}
+
+}
+```
+
+Check out the [Config Store guide](Config_Store_Guide.md) for more details and examples on how to store configuration data securely.
+
 ## Core Components
 
-### %AI.Provider - LLM Provider Interface
+### `%AI.Provider` - LLM Provider Interface
 
 The `%AI.Provider` class represents a connection to an LLM provider. It handles API communication, model selection, and response parsing.
 
@@ -299,7 +350,7 @@ If provider.HasCapability("StreamingResponse") {
 | `CAPABILITYSTREAMING` | `"StreamingResponse"` | Streaming responses | All |
 | `CAPABILITYPROMPTCACHING` | `"PromptCaching"` | Context caching | Anthropic, OpenAI, Gemini, Bedrock (SigV4 only), Vertex |
 
-### %AI.Agent - Execution Engine
+### `%AI.Agent` - Execution Engine
 
 The `%AI.Agent` class is the core execution engine. It manages the interaction between the LLM, tools, and policies. This is what orchestrates multi-turn conversations with tool-calling. It is responsible for:
 - Executing LLM requests with tool schemas
