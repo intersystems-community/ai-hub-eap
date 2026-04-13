@@ -873,6 +873,178 @@ Class MyApp.DataTools Extends %AI.ToolSet
 ```
 
 
+### Stateful Tools (Instance Methods)
+
+Tool methods can be either ClassMethods or instance Methods. When they are instance Methods, the ToolSet instance is created once when the session starts and held alive for the entire session. This means instance properties on the ToolSet class — and on any included tool classes — persist across tool calls.
+
+This lets you build tools that accumulate context, cache results, or track state within a conversation without any external storage:
+
+```objectscript
+Class MyApp.SessionTools Extends %AI.ToolSet
+{
+    XData Definition [ MimeType = application/xml ]
+    {
+        <ToolSet Name="SessionTools">
+            <Tool Name="Remember" Method="Remember"/>
+            <Tool Name="Recall"   Method="Recall"/>
+            <Tool Name="Forget"   Method="Forget"/>
+        </ToolSet>
+    }
+
+    Property Notes As %String(MAXLEN = "");
+
+    /// Store a note for later retrieval in this session.
+    Method Remember(note As %String(DESCRIPTION = "The note to store")) As %String
+    {
+        Set ..Notes = ..Notes _ note _ $C(10)
+        Return "Noted."
+    }
+
+    /// Recall all notes stored in this session.
+    Method Recall() As %String
+    {
+        Return $SELECT(..Notes = "": "No notes stored yet.", 1: ..Notes)
+    }
+
+    /// Clear all stored notes.
+    Method Forget() As %String
+    {
+        Set ..Notes = ""
+        Return "Notes cleared."
+    }
+}
+```
+
+Instance Methods on **included** tool classes work the same way — a single instance is created per session and reused across all calls to that class's tools:
+
+```objectscript
+Class MyApp.MyToolSet Extends %AI.ToolSet
+{
+    XData Definition [ MimeType = application/xml ]
+    {
+        <ToolSet Name="MyToolSet">
+            <!-- MyApp.CartTools has instance Methods; one instance persists per session -->
+            <Include Class="MyApp.CartTools"/>
+        </ToolSet>
+    }
+}
+```
+
+> **Note:** State is scoped to the session. Each new session gets a fresh ToolSet instance with zeroed-out properties.
+
+### Filtering Included Tools
+
+When you include a class with `<Include>`, you can narrow which of its tools are exposed to the LLM using the `Tool` attribute (exact match), the `Match` attribute (regex), or child `<Filter>` elements (OR-logic). You can also remove tools from the composed set with `<Exclude>`.
+
+All filtering happens at **compile time** — the ToolSet is compiled once and the resulting tool list is fixed. There is no runtime overhead.
+
+#### Exact match — `Tool=`
+
+Expose only the named tool from the included class:
+
+```objectscript
+<ToolSet Name="ReadOnlyOrders">
+    <!-- Only expose GetOrder, not CreateOrder, CancelOrder, etc. -->
+    <Include Class="MyApp.OrderTools" Tool="GetOrder"/>
+</ToolSet>
+```
+
+#### Pattern match — `Match=`
+
+`Match` is a POSIX regular expression tested against the tool name. A partial match is sufficient (no need to anchor both ends). Use `^` to anchor to the start:
+
+```objectscript
+<ToolSet Name="GettersOnly">
+    <!-- Include any tool whose name starts with "Get" -->
+    <Include Class="MyApp.CustomerTools" Match="^Get"/>
+</ToolSet>
+```
+
+```objectscript
+<ToolSet Name="SearchAndList">
+    <!-- Include tools starting with "Search" OR "List" -->
+    <Include Class="MyApp.ProductTools" Match="^(Search|List)"/>
+</ToolSet>
+```
+
+#### OR-logic — child `<Filter>` elements
+
+When you need to match tools by more than one name pattern, add `<Filter>` children. A tool passes if it matches **any** child filter or the parent `Tool`/`Match` attributes:
+
+```objectscript
+<ToolSet Name="SelectedTools">
+    <Include Class="MyApp.InventoryTools">
+        <Filter Tool="GetStockLevel"/>
+        <Filter Tool="GetReorderPoint"/>
+        <Filter Match="^List"/>
+    </Include>
+</ToolSet>
+```
+
+This exposes `GetStockLevel`, `GetReorderPoint`, and any tool whose name begins with `List` — all other tools from `MyApp.InventoryTools` are omitted.
+
+#### Excluding tools — `<Exclude>`
+
+`<Exclude>` removes matching tools from the composed set. You can exclude by exact name, regex, or both:
+
+```objectscript
+<ToolSet Name="SafeTools">
+    <Include Class="MyApp.DatabaseTools"/>
+    <!-- Remove destructive operations -->
+    <Exclude Match="^(Delete|Drop|Truncate)"/>
+</ToolSet>
+```
+
+`<Exclude>` also accepts child `<Filter>` elements for OR-logic:
+
+```objectscript
+<ToolSet Name="LimitedTools">
+    <Include Class="MyApp.AdminTools"/>
+    <Exclude>
+        <Filter Tool="ResetAllUsers"/>
+        <Filter Tool="WipeDatabase"/>
+        <Filter Match="^Debug"/>
+    </Exclude>
+</ToolSet>
+```
+
+To exclude tools from a **specific class** only (when you have multiple includes), add the `Class=` attribute to `<Exclude>`:
+
+```objectscript
+<ToolSet Name="CompositeTools">
+    <Include Class="MyApp.OrderTools"/>
+    <Include Class="MyApp.ProductTools"/>
+    <!-- Remove Delete only from OrderTools, not from ProductTools -->
+    <Exclude Class="MyApp.OrderTools" Tool="DeleteOrder"/>
+</ToolSet>
+```
+
+#### Combining Include and Exclude
+
+Filters and excludes compose naturally. Include narrows what comes in; Exclude removes from what remains:
+
+```objectscript
+<ToolSet Name="CustomerServiceTools">
+    <!-- Only Get* and Search* from customer tools -->
+    <Include Class="MyApp.CustomerTools" Match="^(Get|Search)"/>
+    <!-- All order tools except cancellation -->
+    <Include Class="MyApp.OrderTools"/>
+    <Exclude Class="MyApp.OrderTools" Match="^Cancel"/>
+</ToolSet>
+```
+
+#### Summary
+
+| Attribute / Element | Where | Effect |
+|---|---|---|
+| `Tool="Name"` | `<Include>` or `<Filter>` | Exact tool name match |
+| `Match="regex"` | `<Include>`, `<Exclude>`, or `<Filter>` | POSIX regex against tool name |
+| `<Filter>` children | Inside `<Include>` or `<Exclude>` | OR-list: tool passes if any child matches |
+| `Class="ClassName"` | `<Exclude>` | Scope exclusion to one source class |
+
+> **Processing order:** Within a ToolSet, all `<Include>` elements are processed in declaration order (locally defined `<Tool>` elements win over includes with the same name). All `<Exclude>` elements are applied afterwards, across the full composed set.
+
+
 ### Tool Descriptions
 
 The LLM reads two kinds of description from each tool: the **tool description** (what the tool does and when to call it) and **per-parameter descriptions** (what each argument means). Understanding where each comes from helps you choose the most natural way to document your tools.
@@ -1118,19 +1290,118 @@ Compose ToolSets by including other ToolSets. When you include a ToolSet, you ca
 
 You can explicitly include or exclude certain tools from your ToolSet with a `Filter`:
 
-```xml
-<Include Class="%AI.Tools.FileSystem">
-    <Filter>
-        <!-- Only include specific tools -->
-        <Include Name="read_file"/>
-        <Include Name="list_directory"/>
+#### `<Include>` filtering attributes
 
-        <!-- Explicitly exclude dangerous tools -->
-        <Exclude Name="delete_file"/>
-        <Exclude Name="write_file"/>
-    </Filter>
-</Include>
+Two attributes control which tools are selected from an included class:
+
+| Attribute | Type | Effect |
+|---|---|---|
+| `Match` | POSIX regex | Include only tools whose names match the pattern |
+| `Tool` | Exact string | Include only the named tool (optionally `Class:Method`) |
+
+```xml
+<!-- Only Get* and List* tools from OrderManagement -->
+<Include Class="Sample.AI.Tools.OrderManagement" Match="^(Get|List)"/>
+
+<!-- Include only the specific GetOrder tool -->
+<Include Class="Sample.AI.Tools.OrderManagement" Tool="GetOrder"/>
+
+<!-- Include a specific method by class:method (useful when composing nested ToolSets) -->
+<Include Class="Sample.AI.Tools.OrderManagement" Tool="Sample.AI.Tools.OrderManagement:GetOrder"/>
 ```
+
+**Why `Match` regex?** When your tool class follows a naming convention, a regex selects the
+entire category. New methods that fit the convention (e.g. a new `GetCustomer`) are
+automatically included without updating the filter. See
+[`Sample.AI.ToolSet.ReadOnlyOrders`](cls/Sample/AI/ToolSet/ReadOnlyOrders.cls) and
+[`Sample.AI.ToolSet.FullAccessOrders`](cls/Sample/AI/ToolSet/FullAccessOrders.cls) for
+a complete example using the same tool class two ways. Both depend on
+[`Sample.AI.Tools.OrderManagement`](cls/Sample/AI/Tools/OrderManagement.cls) and the
+supporting `Sample.AI.Orders` persistent classes; seed the database before running:
+
+```objectscript
+Do ##class(Sample.AI.Orders.Setup).Setup()
+```
+
+**Pattern: read-only and full-access views of the same class**
+
+Define all operations in one tool class with a consistent verb-prefix convention, then
+create two ToolSets:
+
+```xml
+<!-- ReadOnly: Get* and List* only -->
+<Include Class="Sample.AI.Tools.OrderManagement" Match="^(Get|List)"/>
+
+<!-- FullAccess: everything (also adds authorization policy) -->
+<Include Class="Sample.AI.Tools.OrderManagement"/>
+```
+
+#### `<Exclude>` element
+
+`<Exclude>` is a sibling element (not nested inside `<Include>`) that removes
+already-collected tools by class and/or name. It is applied after all `<Include>` and
+`<Tool>` items have been collected, so it can remove tools regardless of where they came
+from.
+
+| Attribute | Type | Matches against |
+|---|---|---|
+| `Class` | Exact string | Tool's origin class name (fully-qualified) |
+| `Tool` | Exact string | Tool name (optionally `Class:Method`) |
+| `Match` | POSIX regex | Tool name |
+
+A tool is excluded only when **all** specified attributes match. An `<Exclude/>` with
+no attributes is a no-op. `Class` is an exact match — no need to escape dots.
+
+```xml
+<ToolSet Name="SafeTools">
+  <Include Class="Sample.AI.Tools.Everything"/>
+
+  <!-- Remove specific mutating tools from that class -->
+  <Exclude Class="Sample.AI.Tools.Everything" Match="^(Delete|Drop|Reset)"/>
+
+  <!-- Remove a single tool by exact name -->
+  <Exclude Tool="DangerousOperation"/>
+</ToolSet>
+```
+
+#### Child `<Filter>` elements (OR lists)
+
+Both `<Include>` and `<Exclude>` accept one or more child `<Filter>` elements. Multiple filters are OR-ed: a tool passes if it matches **any** one of them. Direct `Tool=` and `Match=` attributes on the parent element participate in the same OR.
+
+This is the concise way to allowlist or denylist several specific tools from one class:
+
+```xml
+<ToolSet Name="OrderTools">
+
+  <!-- Include exactly three tools from OrderManagement (OR allowlist) -->
+  <Include Class="Sample.AI.Tools.OrderManagement">
+    <Filter Tool="GetOrder"/>
+    <Filter Tool="ListOrders"/>
+    <Filter Tool="UpdateOrderStatus"/>
+  </Include>
+
+</ToolSet>
+```
+
+Without child filters you would need a separate `<Include>` per tool, which repeats the class name each time. The child filter form is equivalent but more readable when selecting several tools from one class.
+
+`<Exclude>` supports the same syntax for denylisting specific tools:
+
+```xml
+<ToolSet Name="SafeTools">
+  <Include Class="Sample.AI.Tools.Everything"/>
+
+  <!-- Remove two specific tools from that class (OR denylist) -->
+  <Exclude Class="Sample.AI.Tools.Everything">
+    <Filter Tool="DeleteAll"/>
+    <Filter Tool="ResetDatabase"/>
+  </Exclude>
+
+</ToolSet>
+```
+
+Each `<Filter>` supports the same `Tool=` (exact name) and `Match=` (POSIX regex, partial/anchored match) attributes as the parent `<Include>`/`<Exclude>`.
+
 
 ### Using External MCP Servers
 
