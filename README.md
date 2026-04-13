@@ -83,7 +83,8 @@ We take care of the plumbing, security, accounting, and other boring stuff so yo
 If you're developing in [langchain](https://docs.langchain.com/), the leading Python framework for developing AI applications, you can easily integrate your app with the IRIS security model. Simply store the configuration and credentials for hosted LLMs and remote MCP Servers in the [Config Store](#the-config-store) on IRIS and avoid having to juggle those through impractical environment variables or files. IRIS will not only enforce Role-Based Access Control (RBAC) policies, but can also take care of auditing and offer a central point of governance. 
 This same langchain extension also offers access to our `VectorStore` implementation, exposing IRIS Vector Search to langchain users.
 
-* [langchain guide](langchain_SDK.md) (forthcoming)
+* [LangChain guide](langchain_SDK.md)
+* [Config Store guide](Config_Store_Guide.md)
 
 ### :coffee: I'm a LangChain4J developer, looking to deploiy to production
 
@@ -95,6 +96,8 @@ An experience very similar to the Python one for langchain described above will 
 
 While not specific to the AI Hub, this EAP distribution also includes a new feature called the Config Store, which enables secure storage and governed access to various types of configurations, for example to reach out to external systems. It stores credentials and other secrets in the [IRIS Wallet](https://docs.intersystems.com/irislatest/csp/docbook/Doc.View.cls?KEY=ROARS_secrets_mgmt), adding a convenient mechanism to manage the coordinates and settings that complement those credentials. 
 The different components in the AI Hub are all designed to find LLM and remote MCP server configurations in this new store.
+
+* [Config Store guide](Config_Store_Guide.md)
 
 You can find an example of how to use the config store as part of the [langchain guide](langchain_SDK.md)
 
