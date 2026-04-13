@@ -1184,7 +1184,7 @@ ClassMethod PlaceOrder(
 
 `ELEMENTTYPE` is a schema hint only — it does not affect how the array value is passed to the method at runtime.
 
-> **Note:** Full class-type schema generation applies to plain `%AI.Tool` subclasses (auto-discovered method tools). Tools declared in a ToolSet XML `<Tool/>` element use a simplified schema (string/number/boolean only), since the ToolSet compiler does not have visibility into the class hierarchy at compile time. For tools with complex object parameters, prefer a plain `%AI.Tool` subclass.
+> **Note:** Full class-type schema generation applies to plain `%AI.Tool` subclasses (auto-discovered method tools). Tools declared in a ToolSet XML `<Tool/>` element use a simplified schema (string/number/boolean only), since the ToolSet compiler does not have visibility into the class hierarchy at compile time. For tools with complex object parameters, prefer a plain `%AI.Tool` subclass. For SQL-only tools that need only scalar parameters, the ToolSet `<Query>` element is a good fit — it derives its schema from the `Arguments` attribute and returns the standard result envelope automatically.
 
 
 ### Method 4: Use Built-in Tools
@@ -1215,6 +1215,156 @@ You can also provide `%AI.Tools.SQL` to an agent directly:
 Do agent.UseToolSet("%AI.Tools.SQL")
 ```
 
+### Method 5: Query-as-Tool
+
+Class queries defined on a `%AI.Tool` subclass are automatically discovered and exposed
+as callable tools. No extra dispatch code is needed — `%Discover()` enumerates both
+methods and queries, and `%Invoke()` handles both at runtime.
+
+**When to use:** read-heavy operations that are naturally expressed as SQL queries, where
+you want column-level metadata in the return schema (via `ROWSPEC`) and a standard result
+envelope with row count and truncation flag.
+
+```objectscript
+Class Sample.AI.Tools.ClassBrowser Extends %AI.Tool
+{
+
+XData INSTRUCTIONS [ MimeType = text/markdown ]
+{
+# IRIS Class Browser
+
+Search and browse IRIS class definitions in the current namespace.
+
+**Pattern** uses SQL LIKE syntax: `%` matches any sequence of characters,
+`_` matches one character. Leave empty or omit to return all classes.
+Examples: `Sample.%` (all Sample classes), `%Tool%` (classes with Tool in the name).
+
+**ClassType** narrows by kind. Values: `datatype`, `persistent`, `serial`,
+`registered`, `stream`, `view`. Leave empty or omit to include all types.
+}
+
+/// Search IRIS class definitions by name pattern and optional class type.
+/// Pattern: SQL LIKE syntax, e.g. "Sample.%", "%Tool%". Empty = all classes.
+/// ClassType: filter by kind -- datatype, persistent, serial, registered. Empty = all.
+Query Search(
+    Pattern As %String = "",
+    ClassType As %String = "") As %SQLQuery(
+    ROWSPEC = "Name:%String,ClassType:%String,Abstract:%Boolean,Description:%String") [ SqlProc ]
+{
+    SELECT Name, ClassType, CASE WHEN Abstract = 1 THEN 1 ELSE 0 END AS Abstract, Description
+    FROM %Dictionary.ClassDefinition
+    WHERE Name LIKE CASE WHEN :Pattern = '' THEN '%' ELSE :Pattern END
+      AND (:ClassType = '' OR ClassType = :ClassType)
+    ORDER BY Name
+}
+
+}
+```
+
+**How the framework handles queries:**
+
+- **Discovery:** `%Discover()` enumerates class queries after methods. Each query becomes
+  a tool spec tagged with `"kind": "query"` in its metadata.
+- **Parameters:** The query formalspec is parsed exactly like a method formalspec. Each
+  parameter becomes a JSON Schema property; parameters without a default are marked
+  required.
+- **Return schema:** Built from `ROWSPEC`. Each `Name:Type` segment becomes a typed column
+  in the `rows` array schema.
+- **Execution:** `%Invoke(queryName, args)` uses `%SQL.Statement.%PrepareClassQuery` +
+  `%Execute`, streaming up to `QUERYMAXROWS` rows (class parameter, default 100).
+- **Result envelope:** Always `{"rows": [...], "row_count": N, "truncated": bool, "elapsed_ms": N}`.
+  The LLM can use `truncated: true` as a signal to narrow the query.
+
+**Notes:**
+
+- Handle the "parameter not supplied" case in SQL, not in the default value. The agent
+  passes arguments from the LLM directly; ObjectScript query parameter defaults are not
+  applied by the dispatch layer. The pattern `CASE WHEN :Param = '' THEN '%' ELSE :Param END`
+  handles an absent or empty argument correctly.
+- Use `CASE WHEN bitCol = 1 THEN 1 ELSE 0 END` instead of `COALESCE(bitCol, 0)` for BIT
+  columns — IRIS SQL rejects implicit BIT/INTEGER conversions in COALESCE.
+- Use `%SQLQuery` with `[ SqlProc ]`. Other query types (`%Query`) are not supported by
+  the dispatch layer.
+- The `QUERYMAXROWS` parameter can be overridden per class:
+  ```objectscript
+  Parameter QUERYMAXROWS As INTEGER = 500;
+  ```
+
+### Advanced: Custom Codec Hooks
+
+Every `%AI.Tool` subclass (including `%AI.ToolSet`) has two overrideable instance methods that control how complex arguments are decoded from the LLM and how return values are encoded before being sent back.
+
+#### `%Decode` — inbound argument decoding
+
+Called by the generated `%Invoke` body when a parameter is typed to a concrete IRIS class (not a scalar, `%DynamicObject`, `%DynamicArray`, or collection). The default implementation creates a new instance of `cls` and populates it from the incoming JSON value using `%ToObject`.
+
+```objectscript
+Method %Decode(
+    toolname As %String,   // name of the tool being invoked
+    argname  As %String,   // name of the argument being decoded
+    cls      As %String,   // fully-qualified target class name
+    input    As %Any       // raw JSON value from the LLM (%DynamicObject)
+) As %Any
+```
+
+Override this to add pre-processing, validation, or per-tool dispatch:
+
+```objectscript
+Method %Decode(toolname As %String, argname As %String, cls As %String, input As %Any) As %Any
+{
+    // Log all inbound complex arguments
+    Do ##class(MyApp.ToolLog).LogArg(toolname, argname, input.%ToJSON())
+
+    // Delegate to default behaviour
+    Return ##super(toolname, argname, cls, input)
+}
+```
+
+You can also dispatch per-tool to apply custom mapping for one specific tool without affecting others:
+
+```objectscript
+Method %Decode(toolname As %String, argname As %String, cls As %String, input As %Any) As %Any
+{
+    If toolname = "PlaceOrder" && argname = "item" {
+        // Custom mapping: LLM sends "sku" but the class property is "ProductCode"
+        Set obj = ##class(MyApp.OrderItem).%New()
+        Set obj.ProductCode = input.sku
+        Set obj.Quantity    = input.qty
+        Return obj
+    }
+    Return ##super(toolname, argname, cls, input)
+}
+```
+
+#### `%Encode` — outbound return value encoding
+
+Called by the generated `%Invoke` body after the tool method returns. The default implementation passes scalars and `%DynamicObject`/`%DynamicArray` values through unchanged; IRIS objects are serialised to `%DynamicObject` via `%FromObject`.
+
+```objectscript
+Method %Encode(
+    toolname As %String,   // name of the tool that was invoked
+    rv       As %Any       // raw return value from the tool method
+) As %Any
+```
+
+Override this to post-process or reshape return values:
+
+```objectscript
+Method %Encode(toolname As %String, rv As %Any) As %Any
+{
+    // Wrap the result in an envelope that includes metadata
+    Set encoded = ##super(toolname, rv)
+    If $ISOBJECT(encoded) && encoded.%IsA("%Library.DynamicAbstractObject") {
+        Return {"tool": (toolname), "result": (encoded), "ts": ($ZDATETIME($HOROLOG, 3))}
+    }
+    Return encoded
+}
+```
+
+#### Scope
+
+Both hooks receive the tool name, so a single override can handle all tools uniformly, branch per-tool, or delegate most cases to `##super`. Because `%AI.ToolSet` inherits from `%AI.Tool`, the same override pattern works in both plain tool classes and ToolSets.
+
 ## Building ToolSets
 
 ToolSets are collections of tools organized by domain or functionality. They support composition, filtering, and integration with external services.
@@ -1225,7 +1375,8 @@ Concretely, a ToolSet is an instance of `%AI.Toolset`. Custom ToolSets extend th
 1. Inline tools
 2. Included ToolSets
 3. Included ToolSets with filtering
-4. MCP server (external tools)
+4. Inline SQL queries
+5. MCP server (external tools)
 
 All of the above are demonstrated in the following example:
 
@@ -1249,16 +1400,23 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
             </Include>
 
             <!-- 3. Include with Filtering -->
-            <Include Class="%AI.Tools.FileSystem">
-                <Filter>
-                    <Include Name="read_file"/>
-                    <Include Name="list_directory"/>
-                    <Exclude Name="delete_file"/>
-                    <Exclude Name="write_file"/>
-                </Filter>
-            </Include>
+            <!-- Match= is a POSIX regex; only matching tool names are included -->
+            <Include Class="%AI.Tools.FileSystem" Match="^(read|list)"/>
+            <!-- <Exclude> removes already-collected tools; Tool= is exact, Match= is regex -->
+            <Exclude Class="%AI.Tools.FileSystem" Tool="delete_file"/>
 
-            <!-- 4. MCP Server (External Tools) -->
+            <!-- 4. Inline SQL Query -->
+            <Query Name="FindRecentOrders"
+                   Description="Find the most recent orders, optionally filtered by status."
+                   Arguments="status As %String = ''"
+                   MaxRows="20">
+              SELECT ID, OrderDate, TotalAmount, Status
+              FROM MyApp_Orders.Order
+              WHERE (:status = '' OR Status = :status)
+              ORDER BY OrderDate DESC
+            </Query>
+
+            <!-- 5. MCP Server (External Tools) -->
             <MCP Name="FileServer">
                 <Stdio Executable="/usr/local/bin/mcp-server-filesystem">
                     <Env Name="ALLOWED_PATHS" Value="/data,/tmp"/>
@@ -1277,7 +1435,8 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
 
 ### Including Other ToolSets
 
-Compose ToolSets by including other ToolSets. When you include a ToolSet, you can specify `Requirement`s, which are metadata passed to the included ToolSet used to customize its behavior.
+Compose ToolSets by including other ToolSets or plain `%AI.Tool` subclasses. When you include a class, you can attach `<Requirement>` elements — metadata that is stamped onto each imported tool's spec and can be read by authorization or audit policies.
+
 
 ```xml
 <Include Class="%AI.Tools.SQL">
@@ -1285,6 +1444,18 @@ Compose ToolSets by including other ToolSets. When you include a ToolSet, you ca
     <Requirement Name="Role" Value="%All"/>
 </Include>
 ```
+
+`<Include>` discovers tools by calling `%Discover()` on the included class at **compile time**. This means:
+
+- For `%AI.ToolSet` subclasses: all tools defined in their XData block are imported (after their own Exclude filters are applied).
+- For `%AI.Tool` subclasses: both methods **and class queries** are imported. A `%AI.Tool` subclass with `Query` methods (see [Method 5: Query-as-Tool](#method-5-query-as-tool)) exposes those queries as tools, and they appear in the including ToolSet just like method-based tools.
+
+```xml
+<!-- Include a %AI.Tool subclass that has both methods and class queries -->
+<Include Class="Sample.AI.Tools.ClassBrowser"/>
+<!-- The Search query tool is now available alongside any method tools -->
+```
+
 
 ### Filtering Tools
 
@@ -1401,6 +1572,141 @@ Without child filters you would need a separate `<Include>` per tool, which repe
 ```
 
 Each `<Filter>` supports the same `Tool=` (exact name) and `Match=` (POSIX regex, partial/anchored match) attributes as the parent `<Include>`/`<Exclude>`.
+
+
+### Inline SQL Queries
+
+A `<Query>` element in a ToolSet XData block declares an inline SQL query as a tool. The SQL is prepared and validated at **compile time**, typed parameters are derived from the `Arguments` attribute, and results are returned in the standard SQL result envelope.
+
+**When to use:** SQL-first read operations where you want direct control over the query text, compile-time SQL validation, and automatic parameter schema generation — without writing an extra method or a separate class.
+
+```objectscript
+Class MyApp.ReportTools Extends %AI.ToolSet
+{
+XData Definition [ MimeType = application/xml ]
+{
+<ToolSet Name="ReportTools">
+
+  <Query Name="FindOrders"
+         Description="Find orders for a customer, optionally filtered by status."
+         Arguments="customerId As %Integer, status As %String = ''"
+         MaxRows="50">
+    <![CDATA[
+      SELECT ID, OrderDate, TotalAmount, Status
+      FROM MyApp_Orders.Order
+      WHERE CustomerID = :customerId
+        AND (:status = '' OR Status = :status)
+      ORDER BY OrderDate DESC
+    ]]>
+  </Query>
+
+</ToolSet>
+}
+
+}
+```
+
+#### `<Query>` attributes
+
+| Attribute | Required | Description |
+|---|---|---|
+| `Name` | Yes | Tool name exposed to the LLM |
+| `Description` | Recommended | Natural-language description for the LLM |
+| `Arguments` | When SQL has parameters | Parameter declarations in ObjectScript syntax: `name As %Type = default, ...` |
+| `MaxRows` | No | Maximum rows returned. Overrides the class-level `QUERYMAXROWS` parameter |
+
+#### Writing the SQL
+
+- Use named `:param` placeholders. Positional `?` placeholders are rejected.
+- Every `:param` in the SQL must have a matching entry in `Arguments`, and vice versa.
+- Use `<![CDATA[...]]>` when the SQL contains XML-reserved characters (`<`, `>`, `&`). Using a `--` sequence anywhere inside an XML comment is also illegal; prefer `:` or another separator.
+- The SQL is prepared (and syntax-checked) at compile time. SQL errors prevent the class from compiling.
+
+#### Parameter type mapping
+
+The `Arguments` attribute uses ObjectScript parameter syntax. Type names map to JSON Schema:
+
+| Argument type | JSON Schema type |
+|---|---|
+| `%Integer`, `%Numeric`, `%Double`, `%Float` | `number` |
+| `%Boolean` | `boolean` |
+| `%String`, `%Date`, `%Time`, `%TimeStamp` | `string` |
+
+Parameters without a default value (`= ...`) are marked required in the schema.
+
+#### Handling optional parameters
+
+ObjectScript query parameter defaults are not applied at dispatch time. Handle optional parameters in the SQL itself using a `CASE` expression or an `OR` guard:
+
+```xml
+<Query Name="FindOrders" Arguments="status As %String = ''">
+  SELECT ID, Status FROM MyApp.Order
+  WHERE (:status = '' OR Status = :status)
+</Query>
+```
+
+#### Result envelope
+
+All `<Query>` tools return the standard SQL result envelope:
+
+```json
+{
+  "rows":       [{"ID": 1, "OrderDate": "2025-01-15", "TotalAmount": 99.95}, ...],
+  "row_count":  25,
+  "truncated":  false,
+  "elapsed_ms": 12
+}
+```
+
+`truncated: true` means the result was capped by the row limit. The LLM can use this as a signal to narrow the query.
+
+#### Row limits
+
+The number of rows returned is capped in priority order:
+
+1. The `MaxRows` attribute on the `<Query>` element (per-query override).
+2. The `QUERYMAXROWS` class parameter (applies to all queries on the class; default 100).
+
+```objectscript
+Class MyApp.ReportTools Extends %AI.ToolSet
+{
+    /// Raise the default row cap for all queries on this class.
+    Parameter QUERYMAXROWS = 500;
+
+    XData Definition [ MimeType = application/xml ]
+    {
+    <ToolSet Name="ReportTools">
+
+      <!-- Uses per-query MaxRows=10, ignoring QUERYMAXROWS -->
+      <Query Name="TopSellers" MaxRows="10"
+             Description="Return the 10 best-selling products this month.">
+        SELECT Name, UnitsSold FROM MyApp.Product ORDER BY UnitsSold DESC
+      </Query>
+
+      <!-- Uses class-level QUERYMAXROWS=500 -->
+      <Query Name="AllProducts"
+             Description="List all products.">
+        SELECT Name, Category, Price FROM MyApp.Product ORDER BY Name
+      </Query>
+
+    </ToolSet>
+    }
+}
+```
+
+#### Filtering `<Query>` tools
+
+`<Query>` tools participate in `<Exclude>` filtering like any other tool. The `Name` attribute is matched:
+
+```xml
+<ToolSet Name="SafeReports">
+  <Include Class="MyApp.ReportTools"/>
+  <!-- Suppress a specific query by exact name -->
+  <Exclude Tool="RawDataDump"/>
+  <!-- Suppress all queries whose names start with Internal -->
+  <Exclude Match="^Internal"/>
+</ToolSet>
+```
 
 
 ### Using External MCP Servers
