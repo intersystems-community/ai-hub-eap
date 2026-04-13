@@ -1468,7 +1468,6 @@ Concretely, a ToolSet is an instance of `%AI.Toolset`. Custom ToolSets extend th
 
 All of the above are demonstrated in the following example:
 
-
 ```objectscript
 Class MyApp.CompleteExample Extends %AI.ToolSet
 {
@@ -1523,7 +1522,7 @@ Class MyApp.CompleteExample Extends %AI.ToolSet
 
 ### Including Other ToolSets
 
-Compose ToolSets by including other ToolSets or plain `%AI.Tool` subclasses. When you include a class, you can attach `<Requirement>` elements — metadata that is stamped onto each imported tool's spec and can be read by authorization or audit policies.
+Compose ToolSets by including other `%AI.ToolSets` or plain `%AI.Tool` subclasses. When you include a class, you can attach `<Requirement>` elements — metadata that is stamped onto each imported tool's spec and can be read by authorization or audit policies.
 
 
 ```xml
