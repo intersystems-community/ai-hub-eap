@@ -4,6 +4,16 @@ The `objectscript/cls/Sample/MCP/` directory contains sample MCP Service classes
 
 ## MCP Services
 
+### `Sample.MCP.Service.Testing`
+
+**Purpose**: Automated testing of iris-mcp-server
+
+**Tools exposed**:
+- `Sample.AI.Tools.Math` - Add, Subtract, Multiply, Divide
+- `Sample.AI.Tools.TestUtilities` - Echo, GetTestData, Fail, Slow, GetTimestamp, ValidateParams
+
+**Use case**: Comprehensive automated test suite for iris-mcp-server
+
 ### `Sample.MCP.Service.Calculator`
 
 **Purpose**: Sample/demo MCP service with policies
@@ -128,20 +138,9 @@ Use the following command to run `iris-mcp-server` with a configuration file.
 iris-mcp-server --config test-config.toml run
 ```
 
-You can also supply most configuration elements through the command line:
-
-```bash
-iris-mcp-server --transport stdio run \ 
-    --iris-host localhost \ 
-    --iris-port 11401 \ 
-    --iris-user _SYSTEM \ 
-    --iris-password SYS \ 
-    --iris-endpoint /mcp/calculator
-```
-
 ### Test with Python MCP Client
 
-Tools are namespaced by endpoint path: `/mcp/calculator` → prefix `mcp_calculator`.
+Tools are namespaced by endpoint path: `/mcp/testing` → prefix `mcp_testing`.
 
 ```python
 import asyncio
@@ -162,9 +161,13 @@ async def test_iris_mcp():
             tools = await session.list_tools()
             print(f"Available tools: {[t.name for t in tools.tools]}")
 
-            # Test Add (note the mcp_calculcator prefix)
-            result = await session.call_tool("mcp_calculator_Add", {"a": 5, "b": 3})
+            # Test Add (note the mcp_testing_ prefix)
+            result = await session.call_tool("mcp_testing_Add", {"a": 5, "b": 3})
             print(f"Add(5, 3) = {result}")
+
+            # Test Echo
+            result = await session.call_tool("mcp_testing_Echo", {"text": "Hello, MCP!"})
+            print(f"Echo result: {result}")
 
 asyncio.run(test_iris_mcp())
 ```
@@ -208,3 +211,31 @@ Divides `a` by `b`. Returns an error object if `b` is zero.
   "code": "DIVIDE_BY_ZERO"
 }
 ```
+
+### Testing Utilities (`Sample.AI.Tools.TestUtilities`)
+
+The utilities in this section can be used to test your programs.
+
+#### `Echo(text)`
+Returns the input `text` with length and timestamp metadata.
+
+#### `GetTestData()`
+Returns structured data with various JSON types for serialization testing.
+
+#### `Fail(message)`
+Always throws with the specified message. Tests error propagation.
+
+**Parameters**:
+- `message` (String): Error message (default: "Intentional test failure")
+
+#### Slow(milliseconds)
+Sleeps for the duration specified by `milliseconds` and then returns timing information. Tests timeout handling.
+
+**Parameters**:
+- `milliseconds` (Integer): Sleep duration (default: 1000)
+
+#### `GetTimestamp()`
+Returns the current timestamp in `HOROLOG`, ISO 8601, and Unix formats.
+
+#### `ValidateParams(required, optional)`
+Echoes the `required` and `optional` parameters.
