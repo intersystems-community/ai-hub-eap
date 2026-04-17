@@ -30,7 +30,7 @@ ClassMethod DemoEcho() As %Status
         Set response = agent.Chat(session, "Please use the echo tool to analyze this message: I am feeling great today!")
 
         Write !, "Response:", !
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
         Write !
 
         Return $$$OK
@@ -69,7 +69,7 @@ ClassMethod DemoCreatePR() As %Status
         Set response = agent.Chat(session, "Please create a pull request for the changes in the current directory")
 
         Write !, "Response:", !
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
         Write !
 
         // Show stats
@@ -109,7 +109,7 @@ ClassMethod DemoDirectSubAgent() As %Status
         Set result = echoSkill.%Invoke("Execute", args)
 
         Write !, "Result:", !
-        Do ##class(%AI.System).PrettyPrint(result)
+        Do ##class(%AI.System).RenderMarkdown(result)
         Write !
 
         Return $$$OK

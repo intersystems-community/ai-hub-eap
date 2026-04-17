@@ -67,14 +67,14 @@ ClassMethod DemoChat() As %Status
     Write !, "Asking about available tools...", !
     Set response = agent.Chat(session, "What tools do you have access to?")
     Write !, "Response:", !
-    Do ##class(%AI.System).PrettyPrint(response.Content)
+    Do ##class(%AI.System).RenderMarkdown(response.Content)
     Write !
 
     // Interaction with tool use
     Write !, !, "Asking to list files...", !
     Set response = agent.Chat(session, "List the files in the current directory")
     Write !, "Response:", !
-    Do ##class(%AI.System).PrettyPrint(response.Content)
+    Do ##class(%AI.System).RenderMarkdown(response.Content)
     Write !
 
     // Show stats
@@ -145,7 +145,7 @@ ClassMethod DemoMultiModal() As %Status
     // Send multi-modal content
     Set response = agent.ChatWithContent(session, content)
     Write !, "Response:", !
-    Do ##class(%AI.System).PrettyPrint(response.Content)
+    Do ##class(%AI.System).RenderMarkdown(response.Content)
     Write !
 
     Return $$$OK

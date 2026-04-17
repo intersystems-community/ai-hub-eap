@@ -21,7 +21,9 @@
       - [Declarative Agent Configuration](#declarative-agent-configuration)
         - [Using Declarative Agents](#using-declarative-agents)
     - [%AI.Agent.Session - Session Management](#aiagentsession---session-management)
+    - [Advanced Session Management](#advanced-session-management)
     - [%AI.ToolMgr - Tool Registry \& Policy Manager](#aitoolmgr---tool-registry--policy-manager)
+      - [Tool Policies](#tool-policies)
     - [%AI.LLM.Response - Response Object](#aillmresponse---response-object)
   - [Building Tools](#building-tools)
     - [Method 1: Simple ToolSet with Inline Tools](#method-1-simple-toolset-with-inline-tools)
@@ -45,6 +47,10 @@
       - [Collections and %DynamicArray](#collections-and-dynamicarray)
     - [Method 4: Use Built-in Tools](#method-4-use-built-in-tools)
     - [Method 5: Query-as-Tool](#method-5-query-as-tool)
+    - [Tool Class Parameters](#tool-class-parameters)
+      - [`REQUIRESAUTH` — mark a class as requiring authorization](#requiresauth--mark-a-class-as-requiring-authorization)
+      - [`DISCOVERYLIMIT` — prevent inherited methods from leaking](#discoverylimit--prevent-inherited-methods-from-leaking)
+      - [`STATEFUL` — override automatic statefulness detection](#stateful--override-automatic-statefulness-detection)
     - [Advanced: Custom Codec Hooks](#advanced-custom-codec-hooks)
       - [`%Decode` — inbound argument decoding](#decode--inbound-argument-decoding)
       - [`%Encode` — outbound return value encoding](#encode--outbound-return-value-encoding)
@@ -786,6 +792,184 @@ Set pctUsed = (stats."current_context_tokens" / stats."model_context_size") * 10
 Write "Context: ", $FNUMBER(pctUsed, "", 1), "% used", !
 ```
 
+**Inspecting context:**
+
+```objectscript
+// Get the raw message array (role/content pairs)
+Set messages = session.GetContext()
+Set iter = messages.%GetIterator()
+While iter.%GetNext(.i, .msg) {
+    Write msg.role, ": ", $EXTRACT(msg.content, 1, 80), "...", !
+}
+```
+
+### Advanced Session Management
+
+:warning: The following features are experimental and for advanced use only. Signatures and persistence may change in a future version.
+
+**Resetting sessions:**
+
+Three granular reset methods let you clear different parts of session state:
+
+```objectscript
+session.Reset()          // Clear everything: context, stats, checkpoints, summary
+session.ResetContext()   // Clear context and checkpoints; preserve stats
+session.ResetStats()     // Reset stats only; context and checkpoints are preserved
+```
+
+**Checkpoints — save and restore conversation state:**
+
+Name a point in the conversation and rewind to it later. Useful for branching conversations or recovering from a bad tool result:
+
+```objectscript
+// Save a checkpoint after the user confirms their request
+$$$ThrowOnError(session.AddCheckpoint("confirmed", "User confirmed order intent"))
+
+// ... more turns ...
+
+// Something went wrong — rewind to the checkpoint
+$$$ThrowOnError(session.RewindTo("confirmed"))
+
+// List all checkpoints
+Set cps = session.ListCheckpoints()
+Set iter = cps.%GetIterator()
+While iter.%GetNext(.i, .cp) {
+    Write cp.name, " @ msg ", cp.message_index, " — ", cp.note, !
+}
+
+// Remove a checkpoint when no longer needed
+Do session.RemoveCheckpoint("confirmed")
+```
+
+**Forking — branch a conversation:**
+
+`Fork()` creates a deep copy of the session. The original is unchanged. Forked sessions are independent — changes to one don't affect the other:
+
+```objectscript
+// Branch the conversation to explore two different approaches
+Set main    = session
+Set branch  = session.Fork()
+
+// Run different paths
+Set r1 = agent.Chat(main,   "Try approach A")
+Set r2 = agent.Chat(branch, "Try approach B")
+
+// keepStats:1 copies current stats into the fork (default is fresh stats)
+Set fork2 = session.Fork(1)
+```
+
+**Summarizing long conversations:**
+
+When context grows too long, summarize the oldest messages in-place, preserving the most recent turns for continuity. The summary is stored alongside the context and referenced in future turns:
+
+```objectscript
+// Compact the session: summarize all but the 10 most recent messages
+$$$ThrowOnError(session.Summarize(provider))
+
+// Control how many recent messages to keep intact
+$$$ThrowOnError(session.Summarize(provider, "", 15))
+
+// Use a specific model for summarization (leave "" to use the session's model)
+$$$ThrowOnError(session.Summarize(provider, "gpt-4o-mini", 10))
+
+// Supply a custom summarization prompt
+$$$ThrowOnError(session.Summarize(provider, "", 10, "Summarise as bullet points."))
+```
+
+`ForkAndSummarize()` is the non-destructive version — it creates a fork and summarizes the copy, leaving the original intact:
+
+```objectscript
+// Create a compacted copy without touching the live session
+Set compact = session.ForkAndSummarize(provider)
+```
+
+**Automatic compaction:**
+
+Set `AutoCompactOnTokenLimit = 1` on the agent to trigger compaction automatically when the context window fills. Without this, hitting the token limit raises an error:
+
+```objectscript
+Set agent.AutoCompactOnTokenLimit = 1  // compact automatically instead of erroring
+```
+
+**Exporting and importing session state:**
+
+Sessions persist as database records (`%AI.Agent.Session` is a `%Persistent` class). You can also export the full session state as JSON for cross-process transfer or custom storage:
+
+```objectscript
+// Export as JSON string (messages, checkpoints, stats, summary)
+Set json = session.Export()
+
+// Later — restore into a new session
+$$$ThrowOnError(newSession.Import(json))
+```
+
+To load a persisted session from the database and reconnect it to a provider:
+
+```objectscript
+// Save to database
+$$$ThrowOnError(session.%Save())
+Set sessionId = session.%Id()
+
+// Later, in another process
+Set restored = ##class(%AI.Agent.Session).Load(sessionId, provider)
+Set response = agent.Chat(restored, "Continue where we left off")
+```
+
+**Direct message editing:**
+
+For advanced use cases — injecting tool results, correcting facts, building training data — you can read and modify individual messages:
+
+```objectscript
+// Get a message by 0-based index
+Set msg = session.GetMessage(0)
+Write msg.role, ": ", msg.content, !
+
+// Replace a message
+Set msg.content = "Updated content"
+$$$ThrowOnError(session.SetMessage(0, msg))
+
+// Insert a synthetic message before index 2
+$$$ThrowOnError(session.InsertMessage(2, {
+    "role": "user",
+    "content": "Actually, disregard that last request."
+}))
+
+// Remove a message (checkpoint indices update automatically)
+Set removed = session.RemoveMessage(3)
+```
+
+**Tagging messages:**
+
+Tags let you label individual messages with arbitrary keywords and then find or remove them by tag. Useful for marking grounding context, flagging tool results for review, or pruning specific message categories without touching the rest of the conversation.
+
+Tags are normalized before storage: lowercased and stripped of all non-alphanumeric characters. `"Hello World!"` and `"helloworld"` refer to the same tag. Duplicate normalized tags on a message are silently ignored.
+
+```objectscript
+// Tag a message (0-based index). Comma-separated; all tags normalized.
+$$$ThrowOnError(session.TagMessage(0, "grounding,userProvided"))
+$$$ThrowOnError(session.TagMessage(2, "toolResult"))
+
+// Get the normalized tags on a message as a %DynamicArray (sorted)
+Set tags = session.GetTags(0)
+// -> ["grounding", "userprovided"]
+
+// Remove specific tags from a message
+$$$ThrowOnError(session.UntagMessage(0, "grounding"))
+
+// Remove all tags from a message
+$$$ThrowOnError(session.ClearTags(2))
+
+// Find all messages (by 0-based index) that carry a tag
+Set indices = session.FindByTag("toolResult")
+// -> [2, 5, 7]
+
+// Delete all messages that carry a tag (back-to-front; checkpoint indices stay valid)
+Set deleted = session.DeleteByTag("toolResult")
+Write "Removed ", deleted, " messages", !
+```
+
+Tags are fully persistent: they survive `Export()`/`Import()`, `Fork()`, and `%Save()`/`Load()`. When a message is inserted or removed, tag sets shift in lockstep with checkpoints so indices remain consistent.
+
 
 ### %AI.ToolMgr - Tool Registry & Policy Manager
 
@@ -859,9 +1043,11 @@ The tool exposes a single `web_search(query, count?)` function. It returns:
 }
 ```
 
-**Setting Policies:**
+#### Tool Policies
 
 :warning: advanced / experimental feature -- this capability may change significantly before GA release
+
+**Setting Policies:**
 
 ```objectscript
 // Authorization policy
@@ -870,6 +1056,50 @@ Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.InteractiveAuth).%New())
 // Audit policy
 Do agent.ToolManager.SetAuditPolicy(##class(%AI.Policy.ConsoleAudit).%New())
 ```
+
+**Discovery policies — control which tools the LLM sees:**
+
+A `%AI.Policy.Discovery` subclass filters the tool catalog at runtime before it is sent to the LLM. Override `Resolve()` to return a subset of the full catalog:
+
+```objectscript
+Class MyApp.RoleBasedDiscovery Extends %AI.Policy.Discovery
+{
+    Property UserRole As %String;
+
+    /// Return only tools the current role is allowed to see.
+    Method Resolve(fullCatalog As %DynamicArray) As %DynamicArray
+    {
+        Set visible = []
+        Set iter = fullCatalog.%GetIterator()
+        While iter.%GetNext(.k, .spec) {
+            // Admin sees everything; others see only non-admin tools
+            If (..UserRole = "admin") || (spec.metadata.%Get("admin_only") '= "1") {
+                Do visible.%Push(spec)
+            }
+        }
+        Return visible
+    }
+}
+
+// Attach to the ToolManager
+Set policy = ##class(MyApp.RoleBasedDiscovery).%New()
+Set policy.UserRole = currentUser.Role
+Do agent.ToolManager.SetDiscoveryPolicy(policy)
+```
+
+The discovery policy's `Execute()` method can also intercept tool calls whose name matches a "meta-tool" (e.g., `search_tools`) and handle them directly, before the call reaches the normal tool registry.
+
+**Smart Discovery (RAG-based tool selection):**
+
+Enable Smart Discovery to let the framework automatically select the most relevant tools from a large registry based on the user's message. Tools are embedded and retrieved via semantic similarity, so the LLM only sees the handful most likely to be useful — keeping the prompt focused and reducing noise:
+
+```objectscript
+// Enable Smart Discovery (replaces any manual discovery policy)
+$$$ThrowOnError(agent.ToolManager.EnableSmartDiscovery())
+```
+
+Smart Discovery embeds tool descriptions on registration and retrieves the closest matches at query time. It requires the fast-embed feature to be active and works best with registries of 20+ tools where most are not relevant to any given query.
+
 
 ### %AI.LLM.Response - Response Object
 
@@ -1429,7 +1659,70 @@ Query Search(
   Parameter QUERYMAXROWS As INTEGER = 500;
   ```
 
+
+### Tool Class Parameters
+
+`%AI.Tool` (and by extension `%AI.ToolSet`) supports several class-level parameters that control discovery, authorization, and statefulness.
+
+#### `REQUIRESAUTH` — mark a class as requiring authorization
+
+Set `REQUIRESAUTH = 1` to require that every tool in the class be explicitly approved by an authorization policy before it executes. This is the class-level equivalent of attaching `RequiresAuth` per-tool — use it for any class whose methods perform destructive or mutating operations:
+
+```objectscript
+Class MyApp.DatabaseAdmin Extends %AI.Tool
+{
+    /// All tools in this class require authorization policy approval.
+    Parameter REQUIRESAUTH As BOOLEAN = 1;
+
+    /// Drop a database table. Requires explicit admin authorization.
+    ClassMethod DropTable(tableName As %String) As %String { ... }
+
+    /// Truncate all rows. Requires explicit admin authorization.
+    ClassMethod TruncateTable(tableName As %String) As %String { ... }
+}
+```
+
+Without an authorization policy that explicitly allows the call, any tool in this class returns an access-denied error. This provides a hard safety gate independent of which agent or prompt is calling the tool.
+
+#### `DISCOVERYLIMIT` — prevent inherited methods from leaking
+
+When you extend a base class that has its own methods, `%AI.Tool` discovers all public methods in the class hierarchy by default. Set `DISCOVERYLIMIT` to the class where tool discovery should stop:
+
+```objectscript
+Class MyApp.Derived Extends MyApp.Base
+{
+    /// Only expose tools defined on MyApp.Derived and its subclasses.
+    /// Methods from MyApp.Base and above are not included.
+    Parameter DISCOVERYLIMIT = "MyApp.Derived";
+
+    ClassMethod MyNewTool() As %String { ... }
+}
+```
+
+This is particularly important when extending framework classes (`%AI.MCP.Service`, etc.) that have many internal methods — without `DISCOVERYLIMIT` those infrastructure methods appear as tools.
+
+#### `STATEFUL` — override automatic statefulness detection
+
+By default, ClassMethods are marked as stateless (no session affinity required) and instance Methods are marked as stateful. Set `STATEFUL = 1` when ClassMethods access shared mutable state — globals, process-private globals, or external state — and therefore require a persistent session connection:
+
+```objectscript
+Class MyApp.GlobalCounter Extends %AI.Tool
+{
+    /// This class uses globals, so all tools require session affinity.
+    Parameter STATEFUL As BOOLEAN = 1;
+
+    ClassMethod Increment(by As %Integer = 1) As %Integer
+    {
+        Set ^MyApp.Counter = $GET(^MyApp.Counter) + by
+        Return ^MyApp.Counter
+    }
+}
+```
+
+
 ### Advanced: Custom Codec Hooks
+
+:warning: advanced / experimental feature -- this capability may change significantly before GA release
 
 Every `%AI.Tool` subclass (including `%AI.ToolSet`) has two overrideable instance methods that control how complex arguments are decoded from the LLM and how return values are encoded before being sent back.
 
@@ -2132,7 +2425,7 @@ Class MyApp.StreamCallback Extends %RegisteredObject
 
 ### Example: Interactive AI Shell
 
-The `%AI.System::Shell()` method is a complete example of an agentic application. It demonstrates:
+`%AI.System.Shell()` launches a full interactive terminal session. It delegates to `%AI.Shell.Console.Run()`, which drives a `%AI.Shell.ConsoleAgent` — a pre-configured agent with shell tools, console authorization and audit policies, and a system prompt biased toward ObjectScript. It demonstrates:
 
 - Provider initialization with flexible configuration
 - Agent setup with tools and policies
@@ -2142,7 +2435,7 @@ The `%AI.System::Shell()` method is a complete example of an agentic application
 - Error handling and recovery
 - Markdown rendering and syntax highlighting
 
-**Source:** See `cls/AI/System.cls` for the full implementation.
+**Source:** `%AI.Shell.Console` (REPL loop), `%AI.Shell.ConsoleAgent` (agent behavior), `%AI.Shell.StreamRenderer` (terminal output).
 
 **Running the Shell:**
 

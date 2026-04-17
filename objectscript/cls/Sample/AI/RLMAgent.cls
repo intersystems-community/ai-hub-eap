@@ -49,7 +49,7 @@ Method RunRLM(query As %String, context As %String = "", maxTurns As %Integer = 
             Do out.%Set("finalized", 1)
             Do out.%Set("iterations", i)
             Do out.%Set("answer", ..RLMTools.FinalAnswer)
-            return out
+            Quit out
         }
 
         // Nudge the model toward explicit completion in subsequent turns.

@@ -200,7 +200,7 @@ ClassMethod Demo() As %Status
 
                 Write $C(13), $C(27), "[2K"
                 Write cyan, bold, "Professor", clr, cyan, "> ", clr
-                Do ##class(%AI.System).PrettyPrint(responseObj.Content)
+                Do ##class(%AI.System).RenderMarkdown(responseObj.Content)
             }
 
             Write !

@@ -1,6 +1,6 @@
 /// Create Pull Request Skill
 /// Demonstrates a skill with tool dependencies
-Class Sample.AI.Skill.CreatePR Extends %AI.Skill
+Class Sample.AI.Skill.CreatePR Extends %AI.Agent.Skill
 {
 
 /// Tools this skill needs

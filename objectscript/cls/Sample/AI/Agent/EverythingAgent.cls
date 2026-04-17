@@ -102,7 +102,7 @@ ClassMethod Demo() As %Status
 
         Write !, "Agent: "
         Set response = agent.Chat(session, input)
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
         Write !
 
         // Show token usage after each turn
@@ -143,7 +143,7 @@ ClassMethod DemoFixed() As %Status
 
         Set response = agent.Chat(session, prompt)
         Write "Agent: "
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
         Write !
     }
 

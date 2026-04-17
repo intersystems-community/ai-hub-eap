@@ -47,6 +47,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
   - [The `iris_status` Diagnostic Tool](#the-iris_status-diagnostic-tool)
   - [Smart Discovery (RAG)](#smart-discovery-rag)
   - [Monitoring \& Telemetry](#monitoring--telemetry)
+    - [Real-Time Monitor](#real-time-monitor)
     - [Logging](#logging)
     - [OpenTelemetry Tracing](#opentelemetry-tracing)
     - [Verifying Tool Discovery](#verifying-tool-discovery)
@@ -127,7 +128,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     For example, you can create an MCP server called `/mcp/simple` that points to the `MyApp.MCP.SimpleService` dispatch class:
       - **Name**: `/mcp/simple`
       - **Dispatch Class**: `MyApp.MCP.SimpleService`
-      - **Authentication**: **Password** (or **Unauthenticated** for development)
+      - **Authentication**: **Password** (or **Unauthenticated** for development; **OAuth 2.0** for Remote MCP with Bearer tokens)
 
 3. Run `iris-mcp-server`.
     To run with a configuration file (recommended):
@@ -371,6 +372,13 @@ All flags before the subcommand are global:
 | `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
 
 
+`monitor` subcommand flags (one of `--pid` or `--socket` is required):
+
+| Flag | Description |
+|------|-------------|
+| `--pid=<pid>` | Connect to the `iris-mcp-server` process with this PID |
+| `--socket=<path>` | Connect to the IPC socket at this explicit path |
+
 ## Transport Modes
 
 The following sections demonstrate how to set the transport mode for `iris-mcp-server`.
@@ -507,6 +515,10 @@ Different authentication modes are used for different scenarios. The following t
 When `iris-mcp-server` runs in HTTP/HTTPS mode, each MCP session from a remote client carries its own `Authorization` header (commonly an OAuth 2.0 Bearer token). `iris-mcp-server` forwards the header value unchanged to IRIS on every request within that session. Any valid scheme (Bearer, API-key-as-Authorization, etc.) works without server-side changes.
 
 OAuth passthrough is always active for the HTTP/HTTPS transport. Endpoint `username`/`password`/`bearer` configuration acts as a fallback only when no `Authorization` header arrives from the client.
+
+For IRIS to validate incoming Bearer tokens automatically, OAuth authentication must be enabled on the MCP Server endpoint in the IRIS Management Portal. When enabled, IRIS validates the token at WebSocket session open time — by the time a tool call runs, the end-user identity is already established. Use `OnPreServer()` in your `%AI.MCP.Service` subclass to perform claim-based authorization (scope, audience, groups) after authentication has already succeeded.
+
+Requests carrying a Bearer token whose `exp` claim is already in the past are rejected by `iris-mcp-server` before reaching IRIS.
 
 ### HashiCorp Vault Integration
 
@@ -706,9 +718,9 @@ You can then add an MCP server to InterSystem IRIS that uses your service class:
 3. Create a new application:
    - **Name:** `/mcp/database`
    - **Namespace:** USER
-   - **Dispatch Class:** `MyApp.MCP.DatabaseService` (this is your `%AI.ToolSet` subclass)
+   - **Dispatch Class:** `MyApp.MCP.DatabaseService` (this is your `%AI.MCP.Service` subclass)
    - **Enabled:** Yes
-   - **Authentication:** Password (or Unauthenticated for dev/internal use)
+   - **Authentication:** Password (or Unauthenticated for dev/internal use; **OAuth 2.0** for Remote MCP with Bearer tokens)
 
 ---
 
@@ -716,12 +728,14 @@ You can then add an MCP server to InterSystem IRIS that uses your service class:
 
 ### How Discovery Works
 
-At startup `iris-mcp-server` fetches the tool list from each configured endpoint:
+Tool discovery is deferred until the first MCP client connects. At that point `iris-mcp-server` fetches the tool list from each configured endpoint:
 
 1. Sends `GET {endpoint}/v1/services` to IRIS (conditional GET with `If-None-Match` ETag)
 2. InterSystems IRIS MCP Service returns a JSON tool catalog
 3. `iris-mcp-server` registers the tools, computing a per-tool SHA-256 hash
 4. A service-level ETag is stored for future conditional GETs
+
+If discovery fails (for example, because IRIS is temporarily unreachable), the existing registration is retained so already-registered tools remain available. A fresh discovery attempt is made on the next tool call.
 
 ### Tool Refresh
 
@@ -821,6 +835,59 @@ Smart discovery is indexed automatically as tools are registered. No additional 
 ---
 
 ## Monitoring & Telemetry
+
+
+### Real-Time Monitor
+
+`iris-mcp-server` includes a live terminal dashboard that shows connection pool status, active sessions, tool call throughput, and a live log feed — all updated every 500 ms without interrupting the running server.
+
+**Starting the monitor:**
+
+The server prints its IPC socket path at startup:
+
+```
+INFO IPC server listening on \\.\pipe\iris-mcp-1234 (local-only, owner DACL)
+```
+
+Connect to it by PID or by the socket path:
+
+```powershell
+# Windows — connect by PID
+iris-mcp-server.exe monitor --pid 1234
+
+# Windows — connect by explicit socket path
+iris-mcp-server.exe monitor --socket \\.\pipe\iris-mcp-1234
+```
+
+```bash
+# Unix — connect by PID
+iris-mcp-server monitor --pid 1234
+
+# Unix — connect by explicit socket path
+iris-mcp-server monitor --socket /run/user/1000/iris-mcp-1234.sock
+```
+
+Press `q` or `Ctrl-C` to exit. The `iris-mcp-server` process continues running normally.
+
+**Dashboard panels:**
+
+| Panel | Content |
+|-------|---------|
+| **GATEWAY** | Active MCP sessions (HTTP and stdio), authenticated contexts (distinct OAuth identities), WebSocket sessions, error counts, and discovery cache hit rates |
+| **CONNECTIONS** | Per-endpoint WebSocket pool state (active, queued, idle, total), P50/P99 latency per tool, session eviction counts by reason, IRIS connection failure breakdown by reason, HTTP pool self-heal counters (stale/healed/failed), and WS session error breakdown (send, receive, stale-session) |
+| **TOOLS** | Per-tool call counts, success/error rates, P50/P99 execution latency, and input/output byte totals |
+| **LOG** | Live stream of recent INFO/WARN/ERROR log lines, color-coded by severity |
+
+**Monitor security:**
+
+The monitor communicates with the server through a local IPC channel — a named pipe on Windows and a Unix domain socket on Unix. The channel is strictly one-way: the monitor receives periodic read-only metrics snapshots and cannot send commands to the server.
+
+*Windows:* The named pipe is not accessible over the network. On the local machine, access is restricted to the user who started `iris-mcp-server`, the SYSTEM account, and members of the local Administrators group. No other local user account can connect to the monitor.
+
+*Unix:* The socket file is created with mode `0600`. Only the user who started `iris-mcp-server` and root can connect to the monitor. Unix domain sockets are not accessible over the network.
+
+In both cases the process ID is embedded in the socket path, preventing collisions when multiple `iris-mcp-server` instances run on the same host.
+
 
 ### Logging
 
@@ -1006,6 +1073,8 @@ As a general rule, `max` should be at least as large as the number of tool calls
 | `idle_timeout_secs` | 300 | Close sessions idle longer than this (InterSystems IRIS job halts and its license is freed) |
 | `max_sessions_per_auth_context` | `pool.max` | Cap on concurrent sessions per OAuth user / token identity |
 | `max_age_secs` | off | Hard cap on total session lifetime; session dropped on next idle regardless of activity |
+
+**OAuth deployments:** IRIS validates a Bearer token once, at WebSocket session open. It does not re-validate the token while the session is running — a session stays alive even after the token expires. `idle_timeout_secs` is therefore the primary mechanism for ensuring stale-token sessions are cleaned up. Set it to no more than your OAuth token lifetime so that expired sessions are recycled before the next token rotation.
 
 In deployments with many OAuth users (each user gets their own session pool), lower `idle_timeout_secs` and set `max_sessions_per_auth_context` to prevent license exhaustion:
 

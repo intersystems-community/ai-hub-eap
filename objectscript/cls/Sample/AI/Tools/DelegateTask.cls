@@ -36,7 +36,7 @@ Method Execute(task As %String, specialistRole As %String = "", context As %Stri
 
         // Create sub-agent using CreateSubAgent API
         // This will use safe_block_on internally to handle nested runtime contexts
-        Set subagent = ##class(%AI.SubAgent).Create(
+        Set subagent = ##class(%AI.Agent.SubAgent).Create(
             ..ParentAgent,
             systemPrompt,
             "" // No additional config for now

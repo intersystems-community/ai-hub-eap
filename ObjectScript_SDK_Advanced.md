@@ -5,6 +5,56 @@
 > These capabilities may change significantly before, or even be excluded from the initial GA release of the AI Hub.
 > Please use at your own risk, and do let us know what you think!
 
+## Table of Contents
+
+- [InterSystems AI Hub - Advanced ObjectScript SDK features](#intersystems-ai-hub---advanced-objectscript-sdk-features)
+  - [Table of Contents](#table-of-contents)
+  - [Policy System](#policy-system)
+    - [Authorization Policies](#authorization-policies)
+    - [Audit Policies](#audit-policies)
+    - [Policy Composition](#policy-composition)
+      - [Benefits of Policy Composition](#benefits-of-policy-composition)
+      - [How Policy Composition Works](#how-policy-composition-works)
+      - [Policy Composition Rules](#policy-composition-rules)
+      - [Defining ToolSet-Level Policies](#defining-toolset-level-policies)
+      - [Using `<Requirement>` to pass per-tool metadata to policies](#using-requirement-to-pass-per-tool-metadata-to-policies)
+      - [Example: Combining Global and ToolSet Policies](#example-combining-global-and-toolset-policies)
+  - [Nested Agents (RLM Pattern)](#nested-agents-rlm-pattern)
+      - [Use Cases](#use-cases)
+      - [Performance Considerations](#performance-considerations)
+    - [Creating Sub-Agents](#creating-sub-agents)
+    - [Example: Multi-Level Delegation](#example-multi-level-delegation)
+    - [Running the Examples](#running-the-examples)
+    - [Troubleshooting](#troubleshooting)
+  - [Skills (%AI.Agent.Skill)](#skills-aiagentskill)
+    - [Defining a Skill (ObjectScript subclass)](#defining-a-skill-objectscript-subclass)
+    - [Registering a Skill with an Agent](#registering-a-skill-with-an-agent)
+    - [Loading a Skill from an External URI](#loading-a-skill-from-an-external-uri)
+    - [Exporting a Skill](#exporting-a-skill)
+    - [Skill vs. SubAgent](#skill-vs-subagent)
+  - [RAG (Retrieval-Augmented Generation)](#rag-retrieval-augmented-generation)
+    - [Embedding Providers](#embedding-providers)
+      - [FastEmbed (local, no API key)](#fastembed-local-no-api-key)
+      - [OpenAI Embeddings (API key required)](#openai-embeddings-api-key-required)
+      - [Custom IRIS Embedding Provider](#custom-iris-embedding-provider)
+    - [Vector Store](#vector-store)
+      - [Basic Setup](#basic-setup)
+      - [Promoted Fields (Indexed Filtering)](#promoted-fields-indexed-filtering)
+    - [KnowledgeBase](#knowledgebase)
+      - [Building](#building)
+      - [Indexing Documents](#indexing-documents)
+      - [Re-indexing a Changed Document](#re-indexing-a-changed-document)
+      - [Connecting to an Agent](#connecting-to-an-agent)
+    - [Complete Example: FastEmbed + IRIS Store](#complete-example-fastembed--iris-store)
+    - [Complete Example: OpenAI Embeddings + Promoted Fields](#complete-example-openai-embeddings--promoted-fields)
+    - [API Reference](#api-reference)
+      - [`%AI.RAG.Embedding` (abstract base)](#airagembedding-abstract-base)
+      - [`%AI.RAG.Embedding.FastEmbed`](#airagembeddingfastembed)
+      - [`%AI.RAG.Embedding.OpenAI`](#airagembeddingopenai)
+      - [`%AI.RAG.VectorStore.IRIS`](#airagvectorstoreiris)
+      - [`%AI.RAG.KnowledgeBase`](#airagknowledgebase)
+
+
 
 ## Policy System
 
@@ -399,6 +449,72 @@ Class MyApp.PathSanitizerPolicy Extends (%AI.Policy.Authorization, %XML.Adaptor)
 }
 ```
 
+#### Using `<Requirement>` to pass per-tool metadata to policies
+
+`<Requirement>` elements inside `<Include>` attach arbitrary key-value metadata to each included tool. Both `%CanList` (visibility) and `%CanExecute` (execution) receive this metadata as their second argument — letting a single policy class make tool-specific decisions without needing a separate policy class per tool:
+
+```objectscript
+Class MyApp.HubTools Extends %AI.ToolSet
+{
+    XData Definition [ MimeType = application/xml ]
+    {
+        <ToolSet Name="HubTools">
+            <Policies>
+                <Authorization Class="MyApp.AccessLevelPolicy"/>
+            </Policies>
+
+            <!-- Public tools: no requirement needed -->
+            <Include Class="MyApp.PublicTools"/>
+
+            <!-- Restricted tools: stamp AccessLevel=admin on each -->
+            <Include Class="MyApp.AdminTools">
+                <Requirement Name="AccessLevel" Value="admin"/>
+            </Include>
+        </ToolSet>
+    }
+}
+```
+
+The policy reads `metadata.%Get("AccessLevel")` and compares it to the current user's role:
+
+```objectscript
+Class MyApp.AccessLevelPolicy Extends %AI.Policy.Authorization
+{
+    Property UserRole As %String;
+
+    /// Hide tools whose AccessLevel exceeds the user's role.
+    Method %CanList(tool As %String, metadata As %DynamicObject) As %Boolean
+    {
+        Set required = metadata.%Get("AccessLevel")
+        If (required = "") Return 1                // no requirement = always visible
+        If (required = "admin") && (..UserRole '= "admin") Return 0
+        Return 1
+    }
+
+    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    {
+        Set required = metadata.%Get("AccessLevel")
+        If (required = "admin") && (..UserRole '= "admin") {
+            Return $$$ERROR($$$AICoreToolAccessDenied, "Admin role required")
+        }
+        Return $$$OK
+    }
+}
+```
+
+Multiple `<Requirement>` elements can be combined on a single `<Include>`:
+
+```xml
+<Include Class="MyApp.FinanceTools">
+    <Requirement Name="AccessLevel" Value="finance"/>
+    <Requirement Name="AuditRequired" Value="1"/>
+    <Requirement Name="DataClassification" Value="confidential"/>
+</Include>
+```
+
+All requirements are delivered as a single `%DynamicObject` — `metadata.%Get("AuditRequired")`, `metadata.%Get("DataClassification")`, etc.
+
+
 #### Example: Combining Global and ToolSet Policies
 
 ```objectscript
@@ -497,24 +613,76 @@ Set response = agent.Chat(session, task)
 
 **Method 2: Programmatic Sub-Agent Creation**
 
-To create sub-agents directly in your code:
+`CreateSubAgent()` creates a child agent that inherits the parent's provider, model, temperature, and `MaxIterations`. Only the system prompt changes:
 
 ```objectscript
 // Create parent agent
 Set parentAgent = ##class(%AI.Agent).%New(provider)
 Set parentAgent.Model = "gpt-4"
 
-// Create specialized sub-agent for poetry
-Set poetAgent = ##class(%AI.SubAgent).Create(
-    parentAgent,
-    "You are a creative poet. Write short, beautiful poems."
-)
+// Create a sub-agent that shares the parent's provider (no extra API connection)
+Set poetAgent = parentAgent.CreateSubAgent("You are a creative poet. Write short, beautiful poems.")
+
+// Add tools specific to this sub-agent's role
+Do poetAgent.ToolManager.AddTool("iris:MyApp.PoemTools")
 
 // Run the sub-agent
 Set session = poetAgent.CreateSession()
 Set response = poetAgent.Run(session, "Write a haiku about the ocean")
 Write response.Content
 ```
+
+**Monitoring `Run()` progress with callbacks:**
+
+Pass any object with `OnIterationStart()` and/or `OnIterationComplete()` methods as the fourth argument to `Run()`. The framework calls them on each iteration, letting you log progress, implement timeouts, or update a UI:
+
+```objectscript
+Class MyApp.AgentMonitor Extends %RegisteredObject
+{
+    Property TotalTokens As %Integer [ InitialExpression = 0 ];
+    Property TokenBudget As %Integer [ InitialExpression = 10000 ];
+
+    /// Called before each LLM invocation.
+    /// iteration   - current iteration number (1-based)
+    /// maxIter     - the Run() iteration limit (use for progress math)
+    /// session     - live session; inspect GetStats() for pre-iteration state
+    Method OnIterationStart(iteration As %Integer, maxIter As %Integer, session As %AI.Agent.Session)
+    {
+        Set stats = session.GetStats()
+        Write "[", iteration, "/", maxIter, "] Thinking... ",
+              "(context: ", stats."current_context_tokens", " tokens)", !
+    }
+
+    /// Called after each LLM response + tool execution round.
+    /// response    - full %AI.LLM.Response: .Content, .ToolCalls, .Usage, .HasToolCalls()
+    /// session     - live session after this iteration; stats are updated
+    Method OnIterationComplete(iteration As %Integer, response As %AI.LLM.Response, session As %AI.Agent.Session)
+    {
+        // Log which tools were called this turn
+        If response.HasToolCalls() {
+            Set iter = response.ToolCalls.%GetIterator()
+            While iter.%GetNext(.k, .call) {
+                Write "  → ", call.name, !
+            }
+        }
+
+        // Accumulate token cost and enforce a budget
+        Set ..TotalTokens = ..TotalTokens + response.Usage."total_tokens"
+        If ..TotalTokens > ..TokenBudget {
+            $$$ThrowStatus($$$ERROR($$$GeneralError,
+                "Token budget exceeded: "_..TotalTokens_" > "_..TokenBudget))
+        }
+    }
+}
+
+// Callback is optional — omit the fourth argument to run without monitoring
+Set monitor = ##class(MyApp.AgentMonitor).%New()
+Set monitor.TokenBudget = 5000
+Set response = agent.Run(session, "Analyse this dataset and summarise findings", 10, monitor)
+```
+
+Neither method is required — define only the one you need. The framework checks at runtime whether each method exists on the callback object.
+
 
 ### Example: Multi-Level Delegation
 
@@ -590,14 +758,14 @@ Deep delegation or many parallel delegations multiply API costs. To mitigate thi
 - Limit delegation depth
 - Cache results when possible
 
-## Skills (%AI.Skill)
+## Skills (%AI.Agent.Skill)
 
-A **Skill** is a declaratively-defined sub-agent that can be registered as a tool. It extends `%AI.SubAgent` and adds structured metadata (name, description, parameters, dependencies) via XData blocks. When a parent agent registers a Skill as a tool, it appears with the Skill's description so the LLM knows what it does and when to invoke it.
+A **Skill** is a declaratively-defined sub-agent that can be registered as a tool. It extends `%AI.Agent.SubAgent` and adds structured metadata (name, description, parameters, dependencies) via XData blocks. When a parent agent registers a Skill as a tool, it appears with the Skill's description so the LLM knows what it does and when to invoke it.
 
 ### Defining a Skill (ObjectScript subclass)
 
 ```objectscript
-Class MyApp.Skill.SummarizeDocument Extends %AI.Skill
+Class MyApp.Skill.SummarizeDocument Extends %AI.Agent.Skill
 {
     /// ToolSet classes to add to this skill's sub-agent (comma-separated)
     Parameter TOOLS = "MyApp.Tools.FileSystem";
@@ -657,10 +825,10 @@ Skills can also be loaded from external `SKILL.md` files — useful for sharing 
 
 ```objectscript
 // From a git repository
-Set skill = ##class(%AI.Skill).GetSkillFromURI("https://github.com/myorg/skills", "summarize")
+Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("https://github.com/myorg/skills", "summarize")
 
 // From a local path
-Set skill = ##class(%AI.Skill).GetSkillFromURI("file:///opt/skills/summarize")
+Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("file:///opt/skills/summarize")
 
 // Register with agent as above
 Set skill.ParentAgent = agent
@@ -705,7 +873,7 @@ Do skill.ExportSkill(stream)
 
 ### Skill vs. SubAgent
 
-| | `%AI.SubAgent` | `%AI.Skill` |
+| | `%AI.Agent.SubAgent` | `%AI.Agent.Skill` |
 |---|---|---|
 | **Definition** | Subclass + `GetSystemPrompt()` override | Subclass + `SUMMARY`/`INSTRUCTIONS` XData |
 | **Tool description** | Derived from system prompt | From `SUMMARY.description` |
@@ -713,7 +881,7 @@ Do skill.ExportSkill(stream)
 | **External source** | No | Yes — `GetSkillFromURI()` |
 | **Export** | No | Yes — `ExportSkill()` |
 
-Use `%AI.SubAgent` for simple programmatic sub-agents. Use `%AI.Skill` when you want structured, reusable, shareable skill definitions with rich metadata.
+Use `%AI.Agent.SubAgent` for simple programmatic sub-agents. Use `%AI.Agent.Skill` when you want structured, reusable, shareable skill definitions with rich metadata.
 
 
 

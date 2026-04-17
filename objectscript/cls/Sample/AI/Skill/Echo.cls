@@ -1,6 +1,6 @@
 /// Simple Echo Skill - Demonstrates the Skill pattern
 /// This skill echoes back the user's request with some analysis
-Class Sample.AI.Skill.Echo Extends %AI.Skill
+Class Sample.AI.Skill.Echo Extends %AI.Agent.Skill
 {
 
 /// YAML metadata for this skill

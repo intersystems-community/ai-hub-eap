@@ -59,7 +59,7 @@ ClassMethod SimpleDelegation() As %Status
         Set response = parentAgent.Chat(session, task)
 
         Write !, "--- Final Response ---", !
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
 
         Set stats = session.GetStats()
         Write !, !, "Session Stats:", !
@@ -111,7 +111,7 @@ ClassMethod DeepDelegation() As %Status
         Set response = level1Agent.Chat(session, task)
 
         Write !, "--- Final Response ---", !
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
 
         Set stats = session.GetStats()
         Write !, !, "Session Stats:", !
@@ -161,7 +161,7 @@ ClassMethod ParallelDelegation() As %Status
         Set response = coordinator.Chat(session, task)
 
         Write !, "--- Aggregated Response ---", !
-        Do ##class(%AI.System).PrettyPrint(response.Content)
+        Do ##class(%AI.System).RenderMarkdown(response.Content)
 
         Set stats = session.GetStats()
         Write !, !, "Session Stats:", !
@@ -202,19 +202,19 @@ ClassMethod DirectSubagentCreation() As %Status
         Write !, "Creating specialized sub-agents:", !
 
         Write "  1. Poet sub-agent...", !
-        Set poetAgent = ##class(%AI.SubAgent).Create(parentAgent, "You are a creative poet. Write short, beautiful poems.", "")
+        Set poetAgent = ##class(%AI.Agent.SubAgent).Create(parentAgent, "You are a creative poet. Write short, beautiful poems.", "")
         Set session1 = poetAgent.CreateSession()
         Set response1 = poetAgent.Run(session1, "Write a haiku about the ocean")
         Write "     Result: ", $EXTRACT(response1.Content, 1, 50), "...", !
 
         Write "  2. Mathematician sub-agent...", !
-        Set mathAgent = ##class(%AI.SubAgent).Create(parentAgent, "You are a precise mathematician. Provide exact calculations.", "")
+        Set mathAgent = ##class(%AI.Agent.SubAgent).Create(parentAgent, "You are a precise mathematician. Provide exact calculations.", "")
         Set session2 = mathAgent.CreateSession()
         Set response2 = mathAgent.Run(session2, "What is 17 * 23?")
         Write "     Result: ", response2.Content, !
 
         Write "  3. Chef sub-agent...", !
-        Set chefAgent = ##class(%AI.SubAgent).Create(parentAgent, "You are a professional chef. Give cooking advice.", "")
+        Set chefAgent = ##class(%AI.Agent.SubAgent).Create(parentAgent, "You are a professional chef. Give cooking advice.", "")
         Set session3 = chefAgent.CreateSession()
         Set response3 = chefAgent.Run(session3, "Quick breakfast idea?")
         Write "     Result: ", $EXTRACT(response3.Content, 1, 50), "...", !
