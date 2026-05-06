@@ -25,11 +25,16 @@ No specific license is required to use the AI Hub. You can use your regular deve
 The kits posted on this page can be installed like a normal InterSystems IRIS kit using interactive or silent installer. 
 
 When using a container image, use the following commands to import and launch the image after downloading:
-```Shell
-docker image load -i /path/to/iris-2026.2.0AI.141.0-docker.tar.gz
 
-docker run --name iris-ai-hub -p 1972:1972 -p 52773:52773 -d --volume /path/to/license-key:/external/keys intersystems/iris:2026.2.0AI.141.0 -k /external/keys/iris-container-x64.key
+```Shell
+docker image load -i /path/to/iris-community-2026.2.0AI.162.0-docker.tar.gz
+
+docker run --name iris-ai-hub -p 1972:1972 -p 52773:52773 \
+-d  docker.iscinternal.com/docker-intersystems/intersystems/iris-community:2026.2.0AI.162.0
 ```
+
+Note, if you want to create a remote HTTP MCP server, you may wish to expose a third port, e.g. `-p 8080:8080`. If you are using a M-Chip Mac, you will need to use the arm64 version, and change image name in the commands above accordingly. 
+
 For more about optional parameters, such as `--key` and `--volume`, see the documentation on [running IRIS in containers](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=AFL_containers#AFL_containers_deploy_run1).
 
 To change the default password, see the documentation above or use the following commands:
