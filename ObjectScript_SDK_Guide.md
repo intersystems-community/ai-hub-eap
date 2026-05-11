@@ -72,6 +72,8 @@
       - [Filtering `<Query>` tools](#filtering-query-tools)
     - [Using External MCP Servers](#using-external-mcp-servers)
     - [Configuration Variables](#configuration-variables)
+      - [`env` and `wallet`](#env-and-wallet)
+      - [`config` — InterSystems IRIS ConfigStore](#config--intersystems-iris-configstore)
     - [Exposing IRIS Tools via `iris-mcp-server`](#exposing-iris-tools-via-iris-mcp-server)
   - [Building Agentic Applications](#building-agentic-applications)
     - [Basic Agentic Application Pattern](#basic-agentic-application-pattern)
@@ -465,11 +467,11 @@ Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
   /// Model to use
   Parameter MODEL = "claude-sonnet-4-5@20250929";
 
-  /// API Key (reads from ANTHROPIC_API_KEY if not set)
-  Parameter APIKEY;
+  /// API key -- expand from environment variable at runtime
+  Parameter APIKEY = "@{env.ANTHROPIC_API_KEY}";
 
   /// Comma-separated list of ToolSets
-  Parameter TOOLSETS = "%AI.Tools.FileSystem,%AI.Tools.BMI";
+  Parameter TOOLSETS = "%AI.Tools.FileSystem";
 
   /// System Instructions in Markdown
   XData INSTRUCTIONS [ MimeType = text/markdown ]
@@ -480,7 +482,6 @@ You are a helpful AI assistant specialized in file system operations.
 
 ## Available Tools
 - File System Operations
-- BMI Calculator
   }
 
   /// Custom initialization hook (optional)
@@ -506,10 +507,10 @@ The following table lists the relevant configuration parameters for `%AI.Agent` 
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `PROVIDER` | Provider name | `"anthropic"`, `"openai"`, `"vertex"` |
+| `PROVIDER` | Provider name — optional if `PROVIDERCONFIG` includes `model_provider` | `"anthropic"`, `"openai"`, `"vertex"` |
 | `MODEL` | Model ID | `"claude-sonnet-4-5@20250929"` |
-| `APIKEY` | API key (for simple providers) | Read from environment if empty |
-| `PROVIDERCONFIG` | JSON config (for complex providers) | `{"region": "us-east-1", ...}` |
+| `APIKEY` | API key — supports `@{prefix.key}` placeholders | `"@{env.OPENAI_API_KEY}"`, `"@{wallet.MySecrets.Key}"` |
+| `PROVIDERCONFIG` | Full provider config as JSON — supports `@{prefix.key}` placeholders and may include `model_provider` to replace `PROVIDER` | `"@{config.MyLLM}"`, `"{""project_id"":""my-proj"",""region"":""@{env.REGION}""}"` |
 | `TOOLSETS` | Comma-separated ToolSet classes | `"%AI.Tools.FileSystem,%AI.Tools.SQL"` |
 
 The following example creates a declarative agent configuration using the `PROVIDER`, `MODEL`, `APIKEY`, and `TOOLSETS` properties. It also contains system `INSTRUCTIONS` with an XData block, which prompts the agent with a description and a list of tools.
@@ -524,11 +525,11 @@ The following example creates a declarative agent configuration using the `PROVI
     /// Model to use
     Parameter MODEL = "claude-sonnet-4-5@20250929";
 
-    /// API Key (reads from ANTHROPIC_API_KEY if not set)
-    Parameter APIKEY;
+    /// API key — expand from environment variable at runtime
+    Parameter APIKEY = "@{env.ANTHROPIC_API_KEY}";
 
     /// Comma-separated list of ToolSets
-    Parameter TOOLSETS = "%AI.Tools.FileSystem,%AI.Tools.BMI";
+    Parameter TOOLSETS = "%AI.Tools.FileSystem";
 
     /// System Instructions in Markdown
     XData INSTRUCTIONS [ MimeType = text/markdown ]
@@ -539,7 +540,6 @@ The following example creates a declarative agent configuration using the `PROVI
 
     ## Available Tools
     - File System Operations
-    - BMI Calculator
     }
 
     /// Custom initialization hook (optional)
@@ -1204,7 +1204,7 @@ Class MyApp.Calculator Extends %AI.ToolSet
 }
 ```
 
-Each typed parameter becomes a JSON Schema property. Parameters without a default value are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean`, `%DynamicObject`, `%DynamicArray`, and any `%JSON.Adaptor` subclass.
+Each typed parameter becomes a JSON Schema property. Parameters without a default value are marked required. Supported types: `%String`, `%Integer`, `%Float`, `%Boolean`, `%Binary`, `%DynamicObject`, `%DynamicArray`, and any `%JSON.Adaptor` subclass.
 
 ### Method 3: Wrapping Existing Classes
 
@@ -1480,8 +1480,11 @@ The JSON Schema sent to the LLM for each tool parameter is derived automatically
 | `%TimeStamp` | `{"type": "string", "format": "date-time"}` |
 | `%DynamicObject` | `{"type": "object"}` |
 | `%DynamicArray` | `{"type": "array"}` |
+| `%Binary` | `{"type": "string", "contentEncoding": "base64"}` |
 | `%Stream.GlobalCharacter` | `{"type": "string"}` |
 | `%Stream.GlobalBinary` | `{"type": "string", "contentEncoding": "base64"}` |
+
+`%Binary` parameters are automatically base64-decoded from the caller's input before your method is invoked. `%Binary` return values are automatically base64-encoded before delivery to the caller. Your method works with raw bytes; the framework handles the encoding on both sides.
 
 #### Class types
 
@@ -2239,31 +2242,25 @@ The `Platform` attribute works the same way on `<Remote>` elements, allowing dif
 
 ### Configuration Variables
 
-:warning: In a forthcoming update, this capability will switch to use stored credentials using the IRIS Config Store.
-
-Use `@{prefix.key}` placeholders to pull values from external sources at runtime. Two prefixes are available by default:
+Use `@{prefix.key}` placeholders to pull values from external sources at runtime. Three prefixes are available by default:
 
 | Prefix | Source | Example |
 |---|---|---|
-| `env` | OS environment variable | `@{env.HOME}` |
-| `config` | `^%AI.Config` global | `@{config.BaseURL}` |
+| `env` | OS environment variable | `@{env.OPENAI_API_KEY}` |
 | `wallet` | IRIS Secure Wallet | `@{wallet.AISecrets.OpenAIKey}` |
+| `config` | InterSystems IRIS ConfigStore | `@{config.AI.LLM.ProductionLLM}` |
 
 ```xml
 <MCP Name="APIServer">
     <Stdio Executable="/opt/servers/api-mcp">
         <Env Name="API_KEY" Value="@{wallet.AISecrets.ExternalAPIKey}"/>
-        <Env Name="DATABASE" Value="@{config.DB_CONNECTION}"/>
     </Stdio>
 </MCP>
 ```
 
-Register values at startup:
+#### `env` and `wallet`
 
 ```objectscript
-// ^%AI.Config global (plain config values)
-Set ^%AI.Config("DB_CONNECTION") = "jdbc:IRIS://localhost:1972/USER"
-
 // IRIS Secure Wallet (secrets — requires %Admin_Wallet:USE or CUSTOM usage)
 Do ##class(%Wallet.KeyValue).Create("AISecrets.ExternalAPIKey", {
     "Secret": "sk-proj-...",
@@ -2273,7 +2270,30 @@ Do ##class(%Wallet.KeyValue).Create("AISecrets.ExternalAPIKey", {
 Do ##class(%AI.Utils.SettingStore).RegisterDefaults()
 ```
 
-Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax works everywhere in the framework: ToolSet config, provider settings, and agent system prompts.
+#### `config` — InterSystems IRIS ConfigStore
+
+The `config` prefix resolves named configurations from the InterSystems IRIS ConfigStore. The key is the fully qualified configuration name (`Area.Type[.Subtype].Name`). Short keys with fewer than three segments are automatically prefixed with `AI.LLM`:
+
+- **Descriptor** — identifies which ConfigStore Descriptor your application has registered for the `AI.LLM` area/type
+- **Name** — the name of the specific configuration instance
+
+```objectscript
+// Full FQN -- used as-is
+Parameter PROVIDERCONFIG = "@{config.AI.LLM.ProductionLLM}";
+
+// Short form -- AI.LLM is prepended automatically
+Parameter PROVIDERCONFIG = "@{config.ProductionLLM}";
+
+// With subtype
+Parameter PROVIDERCONFIG = "@{config.AI.LLM.OpenAI.ProductionLLM}";
+```
+
+`##class(%ConfigStore.Configuration).GetDetails()` is called with `resolveSecrets=1`, so any secret references in the stored configuration are resolved to their actual values before being returned. The full JSON details object is used as the placeholder value.
+
+**Prerequisite:** Reading a configuration requires a ConfigStore Descriptor to be registered for the relevant area/type. Refer to the [ConfigStore documentation](Config_Store_Guide.md) for details on creating and registering descriptors.
+
+Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax works everywhere in the framework: ToolSet config, provider settings, and agent parameters.
+
 
 ### Exposing IRIS Tools via `iris-mcp-server`
 
