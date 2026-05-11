@@ -7,17 +7,14 @@ Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
 Parameter PROVIDER = "vertex";
 
 /// Provider configuration
-/// service_account_path can use @{env.VERTEX_SA_PATH} or @{config.VertexSAPath} to avoid hardcoding
+/// service_account_path can use @{env.VERTEX_SA_PATH} or @{config.MyApp/VertexConfig} to avoid hardcoding
 Parameter PROVIDERCONFIG = "{ ""project_id"": ""my-gcp-project"", ""region"": ""us-east5"", ""service_account_path"": ""@{env.VERTEX_SA_PATH}"" }";
 
 /// Model to use (Claude 4.5)
 Parameter MODEL = "claude-sonnet-4-5@20250929";
 
-/// API Key (reads from ANTHROPIC_API_KEY environment variable if not set)
-Parameter APIKEY;
-
 /// ToolSets to attach (comma-separated list)
-Parameter TOOLSETS = "%AI.Tools.FileSystem,%AI.Tools.BMI";
+Parameter TOOLSETS = "%AI.Tools.FileSystem";
 
 /// System Instructions in Markdown format
 XData INSTRUCTIONS [ MimeType = text/markdown ]
@@ -28,7 +25,6 @@ You are a helpful AI assistant specialized in file system operations.
 
 ## Available Tools
 - **File System Operations**: Read files and list directories
-- **BMI Calculator**: Calculate Body Mass Index
 
 ## Guidelines
 - Always explain what you're doing when accessing files
