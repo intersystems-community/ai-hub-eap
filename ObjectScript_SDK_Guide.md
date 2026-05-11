@@ -1059,25 +1059,26 @@ Do agent.ToolManager.SetAuditPolicy(##class(%AI.Policy.ConsoleAudit).%New())
 
 **Discovery policies — control which tools the LLM sees:**
 
-A `%AI.Policy.Discovery` subclass filters the tool catalog at runtime before it is sent to the LLM. Override `Resolve()` to return a subset of the full catalog:
+A `%AI.Policy.Discovery` subclass filters or extends the tool catalog at runtime before it is sent to the LLM. Override `%Resolve()` to modify the catalog in place, and `%Execute()` to handle execution of any tools your policy introduces:
 
 ```objectscript
 Class MyApp.RoleBasedDiscovery Extends %AI.Policy.Discovery
 {
     Property UserRole As %String;
 
-    /// Return only tools the current role is allowed to see.
-    Method Resolve(fullCatalog As %DynamicArray) As %DynamicArray
+    /// Remove tools the current role is not allowed to see.
+    Method %Resolve(catalog As %DynamicArray) As %Status
     {
-        Set visible = []
-        Set iter = fullCatalog.%GetIterator()
-        While iter.%GetNext(.k, .spec) {
-            // Admin sees everything; others see only non-admin tools
-            If (..UserRole = "admin") || (spec.metadata.%Get("admin_only") '= "1") {
-                Do visible.%Push(spec)
+        // Iterate backwards so removing an element does not shift unvisited indices.
+        Set i = catalog.%Size() - 1
+        While i >= 0 {
+            Set spec = catalog.%Get(i)
+            If (..UserRole '= "admin") && (spec.metadata.%Get("admin_only") = "1") {
+                Do catalog.%Remove(i)
             }
+            Set i = i - 1
         }
-        Return visible
+        Return $$$OK
     }
 }
 
@@ -1087,7 +1088,7 @@ Set policy.UserRole = currentUser.Role
 Do agent.ToolManager.SetDiscoveryPolicy(policy)
 ```
 
-The discovery policy's `Execute()` method can also intercept tool calls whose name matches a "meta-tool" (e.g., `search_tools`) and handle them directly, before the call reaches the normal tool registry.
+The `%Execute()` method is called when the LLM invokes a tool that your policy introduced via `%Resolve()`. Return `$$$NULLOREF` if the tool name is not recognised by this policy (the framework falls through to the normal registry); return a `%DynamicObject` result on success. The default implementation returns `$$$NULLOREF`.
 
 **Smart Discovery (RAG-based tool selection):**
 
