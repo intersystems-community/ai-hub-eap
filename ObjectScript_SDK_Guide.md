@@ -276,6 +276,7 @@ ClassMethod Create(name As %String, settings As %DynamicObject) As %AI.Provider
 | Meta Llama | `"meta"` | `api_key` |
 | xAI Grok | `"grok"` | `api_key` |
 | NVIDIA NIM | `"nim"` | `base_url` |
+| ollama | `"openai"` | `base_url`, `api_key` - see example below using their [openai compatibility](https://docs.ollama.com/api/openai-compatibility)  |
 
 **Example Usage:**
 
@@ -310,6 +311,13 @@ Set provider = ##class(%AI.Provider).Create("bedrock", {
 // Note: bearer token mode requires cross-region inference profile IDs
 // (e.g. "us.anthropic.claude-3-5-sonnet-20241022-v2:0") rather than
 // raw model IDs.  ListModels() is not supported in bearer token mode.
+
+// ollama offers an OpenAI compatible API (https://docs.ollama.com/api/openai-compatibility).
+// Note that it requires a dummy API key value
+Set provider = ##class(%AI.Provider).Create("openai", { 
+    "base_url": "http://localhost:11434/v1/", 
+    "api_key": "ollama" 
+})
 
 // List available models
 Set models = provider.ListModels()
