@@ -11,7 +11,7 @@ Parameter PROVIDER = "vertex";
 Parameter PROVIDERCONFIG = "{ ""project_id"": ""my-gcp-project"", ""region"": ""us-east5"", ""service_account_path"": ""@{env.VERTEX_SA_PATH}"" }";
 
 /// Model to use (Claude 4.5)
-Parameter MODEL = "claude-sonnet-4-5@20250929";
+Parameter MODEL = "claude-sonnet-4-6";
 
 /// ToolSets to attach (comma-separated list)
 Parameter TOOLSETS = "%AI.Tools.FileSystem";
