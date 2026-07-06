@@ -42,7 +42,7 @@ answering from memory. Show the tool result in your response.
 }
 
 /// Default models per provider (used when no PROVIDER parameter is set)
-Parameter MODELS = "openai=gpt-4o,anthropic=claude-haiku-4-5-20251001,gemini=gemini-2.0-flash,grok=grok-3";
+Parameter MODELS = "openai=gpt-4o,anthropic=claude-haiku-4-5-20251001,gemini=gemini-2.0-flash,xai=grok-3";
 
 /// Auto-detect provider from environment and create it.
 /// Called by %AI.Agent.%Init() after the standard setup.
