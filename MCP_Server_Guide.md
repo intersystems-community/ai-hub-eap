@@ -48,7 +48,6 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
   - [Service Discovery](#service-discovery)
     - [How Discovery Works](#how-discovery-works)
     - [Tool Refresh](#tool-refresh)
-    - [Endpoint Auto-Discovery](#endpoint-auto-discovery)
     - [Tool Namespacing](#tool-namespacing)
     - [Reconnection](#reconnection)
   - [The `iris_status` Diagnostic Tool](#the-iris_status-diagnostic-tool)
@@ -392,7 +391,6 @@ All flags before the subcommand are global:
 | `--iris-user=<user>` | IRIS connection username |
 | `--iris-password=<pass>` | IRIS connection password |
 | `--iris-endpoint=<path>` | MCP Server path — may be repeated for multiple endpoints |
-| `--auto-discover-interval=<secs>` | Poll for local IRIS instances every N seconds (0 = disabled) |
 | `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
 
 
@@ -455,14 +453,6 @@ key  = "/etc/certs/server.key"
 ```
 
 TLS cert and key can also be supplied from Vault — see [Server-Side TLS](#server-side-tls-remote-mcp-endpoint).
-
-### Local Auto-Discovery
-
-When `--auto-discover-interval` is set, `iris-mcp-server` polls for local running InterSystems IRIS instances (via `iris qlist` on Linux/Mac, or the Windows Registry) and automatically connects to any that appear:
-
-```powershell
-iris-mcp-server.exe --transport=http://0.0.0.0:8080 --config=config.toml run --auto-discover-interval=60
-```
 
 ---
 
@@ -561,13 +551,17 @@ When `iris-mcp-server` runs in HTTP/HTTPS mode, each MCP session from a remote c
 
 OAuth passthrough is always active for the HTTP/HTTPS transport. Endpoint `username`/`password`/`bearer` configuration acts as a fallback only when no `Authorization` header arrives from the client.
 
-For IRIS to validate incoming Bearer tokens automatically, OAuth authentication must be enabled on the MCP Server endpoint in the IRIS Management Portal. When enabled, IRIS validates the token at WebSocket session open time — by the time a tool call runs, the end-user identity is already established. Use `OnPreServer()` in your `%AI.MCP.Service` subclass to perform claim-based authorization (scope, audience, groups) after authentication has already succeeded.
+For IRIS to validate incoming Bearer tokens automatically, OAuth authentication must be enabled on the MCP Server endpoint in the IRIS Management Portal. When enabled, IRIS validates the token at WebSocket session open time — by the time a tool call runs, the end-user identity is already established.
+
+For per-tool authorization based on claims (scope, audience, groups), use a `%AI.Policy.Authorization` subclass attached to your ToolSet — this is the recommended approach for fine-grained access control. `OnPreServer()` in your `%AI.MCP.Service` subclass can be used for session-level connection gating (rejecting the entire session before the dispatch loop starts), but is a blunt instrument compared to the per-tool policy system.
 
 Requests carrying a Bearer token whose `exp` claim is already in the past are rejected by `iris-mcp-server` before reaching IRIS.
 
 ### OAuth 2.1 Authorization Server Proxy
 
-In addition to forwarding tokens that clients already hold (passthrough), `iris-mcp-server` can act as a **transparent broker** for IRIS acting as an OAuth 2.1 Authorization Server. When enabled, `iris-mcp-server`:
+In most deployments, tokens are issued by an external Authorization Server (Okta, Microsoft Entra, etc.) and IRIS acts as the **Resource Server** — validating incoming Bearer tokens but not issuing them. That pattern requires no `[oauth]` section; see [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough) and the [EMA section](#enterprise-managed-authorization-ema) for details.
+
+When IRIS itself acts as the Authorization Server, `iris-mcp-server` can act as a **transparent broker** between MCP clients and IRIS's OAuth 2.1 AS. When the `[oauth]` section is configured, `iris-mcp-server`:
 
 - Serves the RFC 9728 Protected Resource Metadata endpoint (`GET /.well-known/oauth-protected-resource`) — required by the MCP spec 2025-11-25 — so clients can discover the AS from a 401 or proactively
 - Serves the RFC 8414 AS metadata discovery endpoint (`GET /.well-known/oauth-authorization-server`) so MCP clients can auto-discover the full AS configuration
@@ -642,9 +636,22 @@ EMA uses the **Identity Assertion JWT Authorization Grant (ID-JAG)**: the MCP cl
 
 There are two deployment patterns:
 
-**Path A — IRIS as the Authorization Server**
+**External Authorization Server (Okta / Entra as the AS)**
 
-IRIS acts as the OAuth 2.1 AS. The enterprise IdP (Okta, Entra) is configured as an upstream OpenID Connect provider that IRIS trusts. Claude exchanges the ID-JAG with IRIS's AS, which validates it against the IdP and issues an IRIS-scoped access token. iris-mcp-server proxies the AS flows as normal using the existing `[oauth]` configuration.
+The typical enterprise pattern. The enterprise IdP acts directly as the AS; IRIS acts as the **Resource Server**, validating JWTs issued by the IdP. No `[oauth]` section is needed in iris-mcp-server — tokens flow through to IRIS transparently via the existing passthrough mechanism.
+
+iris-mcp-server configuration: no `[oauth]` section needed. Tokens flow through to IRIS transparently.
+
+IRIS-side setup required:
+- Configure IRIS as an OAuth 2.0 **resource server** that trusts the external AS — provide the IdP's JWKS URI in the IRIS OAuth resource server settings so IRIS can validate incoming JWTs locally
+- The MCP endpoint's `AutheEnabled` must include OAuth 2.0 Bearer token validation
+- Refer to the [InterSystems IRIS OAuth 2.0 & OpenID Connect documentation](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GOAUTH) for the IRIS-side setup
+
+> **Note:** In this path, iris-mcp-server does not serve the RFC 9728 Protected Resource Metadata endpoint, so MCP clients cannot auto-discover the AS from iris-mcp-server. The client must be pre-configured with the AS URL, or the enterprise IdP must handle discovery through other means (e.g. organisation-level MCP client configuration in Claude's enterprise settings).
+
+**IRIS as the Authorization Server**
+
+IRIS can act as an OAuth 2.1 AS, with the enterprise IdP (Okta, Entra) configured as an upstream OpenID Connect provider that IRIS trusts. Claude exchanges the ID-JAG with IRIS's AS, which validates it against the IdP and issues an IRIS-scoped access token. iris-mcp-server proxies the AS flows using the `[oauth]` configuration.
 
 ```toml
 [oauth]
@@ -656,19 +663,6 @@ IRIS-side setup required:
 - Configure IRIS as an OAuth 2.1 Authorization Server via **Management Portal → System → Security → OAuth 2.0**
 - Register the enterprise IdP (Okta, Entra) as an OpenID Connect server in the IRIS OAuth configuration
 - Refer to the [InterSystems IRIS OAuth 2.0 & OpenID Connect documentation](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GOAUTH) for full setup instructions
-
-**Path B — External Authorization Server (Okta / Entra as the AS)**
-
-The enterprise IdP acts directly as the AS. In this path, no `[oauth]` section is configured in iris-mcp-server — the server simply passes Bearer tokens through to IRIS unchanged (the existing OAuth passthrough mechanism). IRIS is configured to validate JWTs issued by the external AS directly.
-
-iris-mcp-server configuration: no `[oauth]` section needed. Tokens flow through to IRIS transparently.
-
-IRIS-side setup required:
-- Configure IRIS as an OAuth 2.0 **resource server** that trusts the external AS — provide the IdP's JWKS URI in the IRIS OAuth resource server settings so IRIS can validate incoming JWTs locally
-- The MCP endpoint's `AutheEnabled` must include OAuth 2.0 Bearer token validation
-- Refer to the [InterSystems IRIS OAuth 2.0 & OpenID Connect documentation](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GOAUTH) for the IRIS-side setup
-
-> **Note:** In this path, iris-mcp-server does not serve the RFC 9728 Protected Resource Metadata endpoint, so MCP clients cannot auto-discover the AS from iris-mcp-server. The client must be pre-configured with the AS URL, or the enterprise IdP must handle discovery through other means (e.g. organisation-level MCP client configuration in Claude's enterprise settings).
 
 #### EMA from the client side
 
@@ -901,18 +895,6 @@ server                = { host = "localhost", port = 52773, username = "CSPSyste
 pool                  = { min = 2, max = 5 }
 tool_refresh_interval = "1m"     # more frequent polling during development
 endpoints             = [{ path = "/mcp/myapp" }]
-```
-
-### Endpoint Auto-Discovery
-
-If `endpoints` is omitted from `[[iris]]`, `iris-mcp-server` queries the InterSystems IRIS CSP application registry for all apps matching `/mcp*` and connects to each one automatically.
-
-```toml
-[[iris]]
-name   = "local"
-server = { host = "localhost", port = 1972, username = "CSPSystem", password = "SYS" }
-pool   = { min = 2, max = 5 }
-# endpoints omitted -> auto-discover /mcp* apps
 ```
 
 ### Tool Namespacing
