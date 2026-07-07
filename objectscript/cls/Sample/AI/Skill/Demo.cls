@@ -1,4 +1,4 @@
-/// Demo for Skills and SubAgents
+/// Demo for Skills
 Class Sample.AI.Skill.Demo
 {
 
@@ -8,26 +8,20 @@ ClassMethod DemoEcho() As %Status
     Write !, "=== Echo Skill Demo ===", !
 
     Try {
-        // Create provider
         Set provider = ##class(%AI.Provider).Create("anthropic")
 
-        // Create main agent
         Set agent = ##class(%AI.Agent).%New(provider)
-        Set agent.Model = "claude-sonnet-4-5@20250929"
+        Set agent.Model = "claude-sonnet-4-6"
+        Set agent.SystemPrompt = "You are a helpful assistant."
 
-        // Create echo skill and attach it to the agent
-        Set echoSkill = ##class(Sample.AI.Skill.Echo).%New()
-        Set echoSkill.ParentAgent = agent
+        // Load the Echo skill -- its instructions merge into the system prompt
+        // and its tools are added to the catalog
+        $$$ThrowOnError(agent.UseSkill("Sample.AI.Skill.Echo"))
 
-        // Register skill as a tool
-        Do agent.ToolManager.AddTool(echoSkill)
-
-        // Create session
         Set session = agent.CreateSession()
 
-        // Chat with agent - it can invoke the echo skill
         Write !, "Asking agent to echo a message...", !
-        Set response = agent.Chat(session, "Please use the echo tool to analyze this message: I am feeling great today!")
+        Set response = agent.Chat(session, "Please echo this message: I am feeling great today!")
 
         Write !, "Response:", !
         Do ##class(%AI.System).RenderMarkdown(response.Content)
@@ -47,70 +41,28 @@ ClassMethod DemoCreatePR() As %Status
     Write !, "=== CreatePR Skill Demo ===", !
 
     Try {
-        // Create provider
         Set provider = ##class(%AI.Provider).Create("anthropic")
 
-        // Create main agent
         Set agent = ##class(%AI.Agent).%New(provider)
-        Set agent.Model = "claude-sonnet-4-5@20250929"
+        Set agent.Model = "claude-sonnet-4-6"
+        Set agent.SystemPrompt = "You are a project assistant."
 
-        // Create CreatePR skill and attach it to the agent
-        Set prSkill = ##class(Sample.AI.Skill.CreatePR).%New()
-        Set prSkill.ParentAgent = agent
+        // Load the CreatePR skill -- contributes filesystem tools and PR instructions
+        $$$ThrowOnError(agent.UseSkill("Sample.AI.Skill.CreatePR"))
 
-        // Register skill as a tool
-        Do agent.ToolManager.AddTool(prSkill)
-
-        // Create session
         Set session = agent.CreateSession()
 
-        // Chat with agent - it can invoke the PR creation skill
-        Write !, "Asking agent to create a PR...", !
-        Set response = agent.Chat(session, "Please create a pull request for the changes in the current directory")
+        Write !, "Asking agent to create a PR description...", !
+        Set response = agent.Chat(session, "Please create a pull request description for the changes in the current directory")
 
         Write !, "Response:", !
         Do ##class(%AI.System).RenderMarkdown(response.Content)
         Write !
 
-        // Show stats
         Set stats = session.GetStats()
         Write !, "Session Stats:", !
         Write "  Interactions: ", stats."total_interactions", !
         Write "  Tool Calls: ", stats."total_tool_calls", !
-
-        Return $$$OK
-
-    } Catch ex {
-        Write "Error: ", ex.DisplayString(), !
-        Return ex.AsStatus()
-    }
-}
-
-/// Demo: Direct subagent invocation (without main agent)
-ClassMethod DemoDirectSubAgent() As %Status
-{
-    Write !, "=== Direct SubAgent Demo ===", !
-
-    Try {
-        // Create provider
-        Set provider = ##class(%AI.Provider).Create("anthropic")
-
-        // Create parent agent
-        Set parentAgent = ##class(%AI.Agent).%New(provider)
-        Set parentAgent.Model = "claude-sonnet-4-5@20250929"
-
-        // Create echo skill
-        Set echoSkill = ##class(Sample.AI.Skill.Echo).%New()
-        Set echoSkill.ParentAgent = parentAgent
-
-        // Invoke skill directly (simulating what LLM would do)
-        Write !, "Invoking echo skill directly...", !
-        Set args = {"userRequest": "This is a direct test of the echo skill!"}
-        Set result = echoSkill.%Invoke("Execute", args)
-
-        Write !, "Result:", !
-        Do ##class(%AI.System).RenderMarkdown(result)
-        Write !
 
         Return $$$OK
 
@@ -127,9 +79,6 @@ ClassMethod Demo() As %Status
     If $$$ISERR(sc) Return sc
 
     Set sc = ..DemoCreatePR()
-    If $$$ISERR(sc) Return sc
-
-    Set sc = ..DemoDirectSubAgent()
     If $$$ISERR(sc) Return sc
 
     Return $$$OK
