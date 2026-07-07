@@ -1,5 +1,5 @@
 /// Create Pull Request Skill
-/// Demonstrates a skill with tool dependencies
+/// Demonstrates a skill that contributes filesystem tools and PR workflow instructions to an agent.
 Class Sample.AI.Skill.CreatePR Extends %AI.Agent.Skill
 {
 
@@ -13,7 +13,7 @@ name: create-pr
 description: Create a pull request from current changes
 }
 
-/// Workflow instructions for the subagent
+/// Workflow instructions injected into the parent agent's system prompt
 XData INSTRUCTIONS [ mimetype = "text/markdown" ]
 {
     You are a Pull Request creation assistant. When invoked:
