@@ -3,6 +3,60 @@
 > [!IMPORTANT]
 > Please note this is prerelease software, and any APIs and functionality described in this document is subject to change without prior notice before the initial GA release of the AI Hub.
 
+**Version:** 1.1.0
+
+## What's New in This Guide
+
+This section summarises the user-facing changes in this cycle that affect how you write code. Internal improvements (performance, security hardening, bug fixes) are covered in the separate release notes.
+
+### Skills are now toolsets, not sub-agents
+
+The Skills API has been redesigned. A `%AI.Agent.Skill` now extends `%AI.ToolSet` rather than spawning a sub-agent. When you add a skill to an agent, it contributes its `XData INSTRUCTIONS` text to the system prompt and registers its `TOOLS` directly into the tool catalog. The LLM calls the skill's tools natively -- there is no intermediate `Execute` wrapper call.
+
+**What you need to change if you used the old API:**
+
+- Remove any `Set skill.ParentAgent = agent` lines -- the `ParentAgent` property no longer exists.
+- Remove any direct `skill.%Invoke("Execute", args)` calls -- skills no longer present an `Execute` tool. Use `agent.Chat(session, ...)` as you would for any other tool call.
+- The skill's `TOOLS` parameter still works the same way; those toolsets are now loaded into the parent agent's tool catalog rather than a sub-agent.
+
+See the [Skills](#skills-aiagentskill) section for the updated API and examples.
+
+### `SKILLS` parameter on declarative agents
+
+Declarative `%AI.Agent` subclasses now support a `SKILLS` parameter alongside `TOOLSETS`. Skills listed here are loaded automatically by `%Init()` and their instructions are merged into the system prompt:
+
+```objectscript
+Parameter SKILLS = "MyApp.Skill.CreatePR,MyApp.Skill.ReviewCode";
+```
+
+Subclasses can add to or remove from an inherited skill set using `+`/`-`/`!` sigils -- see [Loading Skills on a Declarative Agent](#loading-skills-on-a-declarative-agent).
+
+### Agent instruction templating
+
+The `XData INSTRUCTIONS` block now supports `{{name}}` variable substitution and `{{= expr }}` ObjectScript expression blocks. Class properties are automatically available as template variables. Pass additional values in the optional context argument to `%Init()`:
+
+```objectscript
+$$$ThrowOnError(agent.%Init({"customerName": "Alice", "tier": "Gold"}))
+```
+
+### Session persistence and restore
+
+Saved sessions now restore automatically. Assigning a database-loaded session to `agent.Session` attaches it to the agent's conversation context without any extra reconstitution step:
+
+```objectscript
+Set agent.Session = ##class(%AI.Agent.Session).%OpenId(id, , .sc)
+$$$ThrowOnError(sc)
+// Ready to continue -- no additional setup needed
+Set response = agent.Chat(agent.Session, "Continue where we left off")
+```
+
+### Provider naming: xAI
+
+The xAI (Grok) provider is now identified as `"xai"`. The alias `"grok"` still works for backwards compatibility, but `"xai"` is the canonical name.
+
+---
+
+
 ## Table of Contents
 
 - [InterSystems AI Hub - ObjectScript SDK User Guide](#intersystems-ai-hub---objectscript-sdk-user-guide)
@@ -107,7 +161,7 @@ InterSystems AI Hub is a comprehensive framework for building AI-powered applica
 
 The InterSystems AI Hub bridges the gap between ObjectScript applications and modern LLM providers. It allows you to:
 
-- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI Grok, NVIDIA NIM
+- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI, NVIDIA NIM, DeepSeek, OpenRouter
 - **Build AI agents** - Create autonomous agents that can use tools to accomplish complex tasks
 - **Define tools in ObjectScript** - Expose ObjectScript methods, SQL queries, and external services as tools
 - **Implement governance** - Control tool execution with authorization and audit policies
@@ -268,14 +322,16 @@ ClassMethod Create(name As %String, settings As %DynamicObject) As %AI.Provider
 
 | Provider | Name | Key Settings |
 |----------|------|--------------|
-| OpenAI | `"openai"` | `api_key`, `organization` |
+| OpenAI | `"openai"` | `api_key`, `organization`, `base_url` (regional keys — e.g. `https://us.api.openai.com/v1`) |
 | Anthropic | `"anthropic"` | `api_key` |
 | Google Gemini | `"gemini"` | `api_key` |
 | Google Vertex AI | `"vertex"` | `project_id`, `region`, `service_account_path` |
 | AWS Bedrock | `"bedrock"` | `region` (SigV4) or `bearer_token` + `region` |
 | Meta Llama | `"meta"` | `api_key` |
-| xAI Grok | `"grok"` | `api_key` |
+| xAI | `"xai"` (alias: `"grok"`) | `api_key` |
 | NVIDIA NIM | `"nim"` | `base_url` |
+| DeepSeek | `"deepseek"` | `api_key` |
+| OpenRouter | `"openrouter"` | `api_key`, `site_url`, `site_name` |
 | ollama | `"openai"` | `base_url`, `api_key` - see example below using their [openai compatibility](https://docs.ollama.com/api/openai-compatibility)  |
 
 **Example Usage:**
@@ -317,6 +373,22 @@ Set provider = ##class(%AI.Provider).Create("bedrock", {
 Set provider = ##class(%AI.Provider).Create("openai", { 
     "base_url": "http://localhost:11434/v1/", 
     "api_key": "ollama" 
+})
+
+// Note: Bedrock API keys are region-specific.  The "region" value must
+// match the region where the key was generated in the Bedrock console.
+
+// DeepSeek
+Set provider = ##class(%AI.Provider).Create("deepseek", {
+    "api_key": "sk-..."
+})
+
+// OpenRouter — api_key is required; site_url and site_name are optional identity
+// headers shown in the OpenRouter dashboard
+Set provider = ##class(%AI.Provider).Create("openrouter", {
+    "api_key": "sk-or-...",
+    "site_url": "https://myapp.example.com",
+    "site_name": "My App"
 })
 
 // List available models
@@ -365,6 +437,48 @@ If provider.HasCapability("StreamingResponse") {
 | `CAPABILITYTOOLCALLING` | `"ToolCalling"` | Function/tool calling | Anthropic, OpenAI, Gemini, Bedrock, Vertex |
 | `CAPABILITYSTREAMING` | `"StreamingResponse"` | Streaming responses | All |
 | `CAPABILITYPROMPTCACHING` | `"PromptCaching"` | Context caching | Anthropic, OpenAI, Gemini, Bedrock (SigV4 only), Vertex |
+
+**HTTP and TLS configuration:**
+
+All providers use an underlying HTTP client that can be configured for enterprise network requirements. Pass an `http_config` object alongside the provider settings:
+
+```objectscript
+// Private or internal CA certificate (recommended for internal PKI)
+Set provider = ##class(%AI.Provider).Create("openai", {
+    "api_key": "sk-...",
+    "http_config": {
+        "tls": {
+            "ca_certificates": ["/etc/ssl/certs/my-internal-ca.pem"]
+        },
+        "connect_timeout_secs": 10,
+        "request_timeout_secs": 120
+    }
+})
+
+// Mutual TLS (client certificate)
+Set provider = ##class(%AI.Provider).Create("openai", {
+    "api_key": "sk-...",
+    "http_config": {
+        "tls": {
+            "client_certificate": {
+                "cert_path": "/etc/ssl/client.pem",
+                "key_path":  "/etc/ssl/client.key"
+            }
+        }
+    }
+})
+
+// Proxy
+Set provider = ##class(%AI.Provider).Create("openai", {
+    "api_key": "sk-...",
+    "http_config": {
+        "proxy_url": "http://proxy.corp.example.com:8080"
+    }
+})
+```
+
+The `tls` block also accepts `accept_invalid_certs` and `accept_invalid_hostnames` flags to disable certificate validation entirely. These exist only as a break-glass option (for example, while an expired certificate is being replaced). Because disabling TLS validation in production is dangerous, both flags require the environment variable `ALLOW_DANGEROUS_TLS=1` to be set in the IRIS process; provider creation fails with a configuration error if the variable is absent. Use a private CA bundle instead whenever possible.
+
 
 ### `%AI.Agent` - Execution Engine
 
@@ -1051,6 +1165,33 @@ The tool exposes a single `web_search(query, count?)` function. It returns:
 }
 ```
 
+`rust:shell` — shell command execution with background task support.
+
+**Authorization required.** The shell tool sets `requires_auth: true` — agents cannot call it unless an authorization policy is configured. Without a policy the tool is unavailable to the LLM. Use `%AI.Policy.InteractiveAuth` for interactive sessions or write a custom `%AI.Policy.Authorization` subclass for programmatic approval rules.
+
+**Stateful tool.** The shell tool maintains working-directory state and background-task state in the process instance that handled the `AddTool` call. Subsequent calls to `task_io`, `terminate_task`, and `list_tasks` must reach the same process instance. When deploying behind a CSP job pool or REST gateway, the session must use a dedicated (non-shared) connection — i.e. the MCP WebSocket endpoint rather than the stateless REST endpoint.
+
+```objectscript
+// Add shell tools (bash, terminate_task, task_io, list_tasks, change_directory, ...)
+// Authorization policy required — the LLM cannot call the shell without one.
+Do agent.ToolManager.AddTool("rust:shell")
+Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.InteractiveAuth).%New())
+```
+
+The shell tool exposes:
+
+| Tool | Description | Auth required |
+|---|---|---|
+| `bash` | Execute a shell command (synchronous or background) | Yes |
+| `terminate_task` | Terminate a running background task | Yes |
+| `task_io` | Send stdin / read stdout of a background task | No |
+| `list_tasks` | List all background tasks for this session | No |
+| `change_directory` | Change the working directory (persists across commands) | No |
+| `get_working_directory` | Get the current working directory | No |
+
+When `bash` is called with `run_in_background: true`, the command runs asynchronously and returns a `task_id`. Use `task_io` to stream output and `terminate_task` to stop it. Task IDs are random (UUID-based) and scoped to the shell provider instance — tasks cannot be accessed from a different agent or a different process.
+
+
 #### Tool Policies
 
 :warning: advanced / experimental feature -- this capability may change significantly before GA release
@@ -1138,6 +1279,44 @@ If response.ToolCalls.%Size() > 0 {
     }
 }
 ```
+
+### %AI.Catalog - Asset Discovery
+
+`%AI.Catalog` provides design-time discovery of all `%AI` assets (skills, toolsets, tools, agents) defined in the current namespace. It queries `%Dictionary.CompiledClass` directly — no registration step is required; defining a subclass is sufficient.
+
+All methods accept an optional `pattern` argument (SQL `LIKE` syntax, e.g. `"MyApp.%"`) and return a `%Library.DynamicArray` of `%DynamicObject` entries.
+
+```objectscript
+// List all skills
+Set skills = ##class(%AI.Catalog).Skills()
+Set iter = skills.%GetIterator()
+While iter.%GetNext(.key, .entry) {
+    Write entry.name, " — ", entry.description, !
+    If entry.tools '= "" { Write "  tools: ", entry.tools, ! }
+}
+
+// Scope to a package
+Set myTools = ##class(%AI.Catalog).Tools("MyApp.%")
+Set mySets  = ##class(%AI.Catalog).ToolSets("MyApp.%")
+Set myAgents = ##class(%AI.Catalog).Agents("MyApp.%")
+
+// Find a single entry by class name (returns type + metadata, or "" if not found)
+Set entry = ##class(%AI.Catalog).Find("MyApp.Skill.CreatePR")
+Write entry.type, ": ", entry.name, !   // skill: MyApp.Skill.CreatePR
+```
+
+| Method | Discovers | Key fields |
+|--------|-----------|------------|
+| `Skills(pattern)` | Subclasses of `%AI.Agent.Skill` | `name`, `description`, `tools` |
+| `ToolSets(pattern)` | Subclasses of `%AI.ToolSet` | `name`, `description` |
+| `Tools(pattern)` | Subclasses of `%AI.Tool` (excludes ToolSets and SubAgents) | `name`, `description` |
+| `Agents(pattern)` | Subclasses of `%AI.Agent` | `name`, `description` |
+| `Find(name)` | Any of the above by exact class name | adds `type` field |
+
+For skills, `description` comes from `Parameter DESCRIPTION` when set, falling back to the class comment. Abstract, hidden, and system classes are excluded from all queries.
+
+---
+
 
 ## Building Tools
 
@@ -2179,6 +2358,8 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
     <Remote URL="http://localhost:8080/mcp"/>
 </MCP>
 ```
+
+**Environment isolation.** Stdio child processes run with a clean environment — they do not inherit the IRIS process's environment, which would otherwise expose LLM API keys and other credentials to every MCP server. Any environment variable the server needs must be passed explicitly via `<Env>` elements (using literal values or `@{env.VAR}`, `@{wallet.path}` references). This is intentional: an MCP server should receive only what it is explicitly given.
 
 **Remote MCP Server with authentication:**
 
