@@ -178,7 +178,7 @@ ClassMethod Setup() As %Status
 
     Set rs = stmt.%Execute()
     Set count = 0
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set count = count + 1
         Set lang = ##class(Sample.AI.Proglang.Language).%OpenId(rs.%Get("ID"))
 

@@ -159,10 +159,11 @@ ClassMethod Setup() As %Status
 
     Write !, "Products:", !
     Set stmt = ##class(%SQL.Statement).%New()
-    Do stmt.%Prepare("SELECT Name, Category, Price, Stock FROM Sample_AI_Orders.Product ORDER BY Category, Name")
+    Set sc = stmt.%Prepare("SELECT Name, Category, Price, Stock FROM Sample_AI_Orders.Product ORDER BY Category, Name")
+    If $$$ISERR(sc) { Write "SQL error: ", $SYSTEM.Status.GetErrorText(sc), !  Return sc }
     Set rs = stmt.%Execute()
     Set count = 0
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set count = count + 1
         Write $JUSTIFY(count, 3), ". ", rs.%GetData(1)
         Write " [", rs.%GetData(2), "]"
@@ -171,12 +172,13 @@ ClassMethod Setup() As %Status
     }
 
     Write !, "Orders:", !
-    Do stmt.%Prepare(
+    Set sc = stmt.%Prepare(
         "SELECT OrderRef, CustomerName, Product->Name, Quantity, Status, OrderDate"
         _ " FROM Sample_AI_Orders.CustomerOrder ORDER BY OrderRef")
+    If $$$ISERR(sc) { Write "SQL error: ", $SYSTEM.Status.GetErrorText(sc), !  Return sc }
     Set rs = stmt.%Execute()
     Set count = 0
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set count = count + 1
         Write $JUSTIFY(count, 3), ". ", rs.%GetData(1)
         Write "  ", rs.%GetData(2)

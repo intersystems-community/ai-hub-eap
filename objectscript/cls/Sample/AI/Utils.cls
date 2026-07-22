@@ -22,10 +22,10 @@ ClassMethod GetEnvKey(varName As %String) As %String [ Private ]
 /// Return an API key for the given provider, or auto-detect from all known providers.
 ///
 /// Arguments:
-///   provider      - Optional provider name (openai, anthropic, gemini, grok, meta, nim, deepseek, openrouter, zai/glm, zhipu/bigmodel)
+///   provider      - Optional provider name (openai, anthropic, gemini, xai, meta, nim,
+///                   deepseek, kimi/moonshot, openrouter, zai/glm, zhipu/bigmodel).
 ///                   If omitted or "", tries providers in priority order until a key is found.
-///   foundProvider - Output. Set to the normalised provider name whose key was returned
-///                   
+///   foundProvider - Output. Set to the normalised provider name whose key was returned.
 ///
 /// Returns the key string, or "" if not found.
 ///
@@ -56,14 +56,15 @@ ClassMethod GetAPIKey(provider As %String = "", Output foundProvider As %String)
     Set map("gemini")     = "GEMINI_API_KEY"
     Set map("glm")        = "ZAI_API_KEY"
     Set map("google")     = "GEMINI_API_KEY"
+    Set map("kimi")       = "MOONSHOT_API_KEY"
     Set map("meta")       = "META_API_KEY"
+    Set map("moonshot")   = "MOONSHOT_API_KEY"
     Set map("nim")        = "NIM_API_KEY"
     Set map("openai")     = "OPENAI_API_KEY"
     Set map("openrouter") = "OPENROUTER_API_KEY"
     Set map("xai")        = "XAI_API_KEY"
     Set map("zai")        = "ZAI_API_KEY"
     Set map("zhipu")      = "ZHIPU_API_KEY"
-
 
     // Specific provider requested
     If provider '= "" {
@@ -74,9 +75,9 @@ ClassMethod GetAPIKey(provider As %String = "", Output foundProvider As %String)
         Return ..GetEnvKey(envVar)
     }
 
-    // Auto-detect: try explicit providers in priority order
+    // Auto-detect: try providers in explicit priority order
     Set key = ""
-    For p = "openai","anthropic","gemini","xai","meta","nim","deepseek","openrouter","zai","zhipu" {
+    For p = "openai","anthropic","gemini","xai","meta","nim","deepseek","kimi","openrouter","zai","zhipu" {
         Set key = ..GetEnvKey($GET(map(p)))
         If key '= "" {
             Set foundProvider = p

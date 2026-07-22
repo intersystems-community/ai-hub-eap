@@ -31,11 +31,11 @@ You are a helpful assistant with access to a set of MCP tools from the
 
 ## Available tools
 
-- **echo** — repeat a message back verbatim
-- **add** — add two numbers and return the result
-- **longRunningOperation** — simulate a task that takes time (specify duration in seconds and number of progress steps)
-- **getTinyImage** — retrieve a small test image
-- **printEnv** — show current environment variables
+- **echo** -- repeat a message back verbatim
+- **add** -- add two numbers and return the result
+- **longRunningOperation** -- simulate a task that takes time (specify duration in seconds and number of progress steps)
+- **getTinyImage** -- retrieve a small test image
+- **printEnv** -- show current environment variables
 
 When the user asks you to do something, use the appropriate tool rather than
 answering from memory. Show the tool result in your response.
@@ -53,7 +53,7 @@ Method %OnInit() As %Status
 
     Set key = ##class(Sample.AI.Utils).GetAPIKey("", .providerName)
     If key = "" {
-        Return $$$ERROR($$$GeneralError, "No API key found. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, GROK_API_KEY")
+        Return $$$ERROR($$$GeneralError, "No API key found. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, XAI_API_KEY")
     }
 
     Set ..Provider = ##class(%AI.Provider).Create(providerName, { "api_key": (key) })

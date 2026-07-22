@@ -12,16 +12,16 @@ Method ConfigureRLM(context As %String = "") As %Status
     Set sc = $$$OK
     Try {
         Set ..RLMTools = ##class(Sample.AI.Tools.RLM).%New()
-        Set sc = ..RLMTools.Reset(context)
-        Quit:$$$ISERR(sc) sc
+        $$$ThrowOnError(..RLMTools.Reset(context))
 
         // Register this specific toolset instance so it keeps per-run state.
         Do ..ToolManager.RegisterLocalTool("Sample.AI.Tools.RLM", ..RLMTools)
         Set ..SystemPrompt = ..RLMSystemPrompt()
-        Quit $$$OK
     } Catch ex {
-        Quit ex.AsStatus()
+        Set sc = ex.AsStatus()
     }
+
+    Return sc
 }
 
 Method RunRLM(query As %String, context As %String = "", maxTurns As %Integer = 0) As %DynamicObject
@@ -33,7 +33,7 @@ Method RunRLM(query As %String, context As %String = "", maxTurns As %Integer = 
     If $$$ISERR(sc) {
         Do out.%Set("success", 0)
         Do out.%Set("error", $System.Status.GetErrorText(sc))
-        Quit out
+        Return out
     }
 
     // Build 122+ uses CreateSession() to inherit provider/model/prompt/tool config
@@ -49,7 +49,7 @@ Method RunRLM(query As %String, context As %String = "", maxTurns As %Integer = 
             Do out.%Set("finalized", 1)
             Do out.%Set("iterations", i)
             Do out.%Set("answer", ..RLMTools.FinalAnswer)
-            Quit out
+            Return out
         }
 
         // Nudge the model toward explicit completion in subsequent turns.
@@ -61,7 +61,8 @@ Method RunRLM(query As %String, context As %String = "", maxTurns As %Integer = 
     Do out.%Set("iterations", turns)
     Do out.%Set("answer", last)
     Do out.%Set("note", "Max turns reached before finalize().")
-    Quit out
+
+    Return out
 }
 
 ClassMethod RLMSystemPrompt() As %String

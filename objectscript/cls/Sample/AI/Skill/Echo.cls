@@ -29,9 +29,9 @@ You are an echo assistant. When the user provides input:
 Method AnalyzeSentiment(text As %String) As %String
 {
     // Simple sentiment analysis
-    If text [ "happy" || (text [ "great") || (text [ "excellent") {
+    If (text [ "happy") || (text [ "great") || (text [ "excellent") {
         Return "positive"
-    } ElseIf text [ "sad" || (text [ "bad") || (text [ "terrible") {
+    } ElseIf (text [ "sad") || (text [ "bad") || (text [ "terrible") {
         Return "negative"
     } Else {
         Return "neutral"

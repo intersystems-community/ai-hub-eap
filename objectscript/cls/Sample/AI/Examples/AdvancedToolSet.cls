@@ -58,14 +58,14 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server — no auth (open/internal endpoint) -->
+      <!-- Remote MCP Server -- no auth (open/internal endpoint) -->
       <!--
       <MCP Name="RemoteTools">
         <Remote URL="http://localhost:3000/mcp" />
       </MCP>
       -->
 
-      <!-- Remote MCP Server — OAuth Bearer token
+      <!-- Remote MCP Server -- OAuth Bearer token
            Sends: Authorization: Bearer <token>
            Use @{env.VAR} to inject from environment at runtime. -->
       <!--
@@ -76,7 +76,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server — HTTP Basic auth
+      <!-- Remote MCP Server -- HTTP Basic auth
            Sends: Authorization: Basic base64(username:password) -->
       <!--
       <MCP Name="BasicAuthRemote">
@@ -87,7 +87,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server — Arbitrary header (API key or custom scheme)
+      <!-- Remote MCP Server -- Arbitrary header (API key or custom scheme)
            Sends the named header with the given value verbatim. -->
       <!--
       <MCP Name="ApiKeyRemote">

@@ -114,7 +114,7 @@ ClassMethod MultiProvider() As %Status
             Do settings.%Set("api_key", anthropicKey)
             Set provider = ##class(%AI.Provider).Create("anthropic", settings)
             Set agent = ##class(%AI.Agent).%New(provider)
-            Set agent.Model = "claude-3-5-sonnet-20241022"
+            Set agent.Model = "claude-sonnet-4-6"
             Set session = agent.CreateSession()
             Set response = agent.Chat(session, "Say hello in Spanish")
             Write "Response: ", response.Content, !

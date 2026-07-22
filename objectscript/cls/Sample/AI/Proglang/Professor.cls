@@ -9,7 +9,7 @@ Include %AI
 Class Sample.AI.Proglang.Professor Extends %AI.Agent
 {
 
-Parameter MODELS = "openai=gpt-4o,anthropic=claude-sonnet-4-6,gemini=gemini-2.0-flash,grok=grok-3";
+Parameter MODELS = "openai=gpt-4o,anthropic=claude-sonnet-4-6,gemini=gemini-2.0-flash,xai=grok-3";
 
 XData INSTRUCTIONS [ MimeType = text/markdown ]
 {
@@ -51,7 +51,7 @@ Method %OnInit() As %Status
     If '$ISOBJECT(..Provider) {
         Set key = ##class(Sample.AI.Utils).GetAPIKey("", .providerName)
         If key = "" {
-            Return $$$ERROR($$$GeneralError, "No API key found. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or GROK_API_KEY")
+            Return $$$ERROR($$$GeneralError, "No API key found. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or XAI_API_KEY")
         }
         Set ..Provider = ##class(%AI.Provider).Create(providerName, { "api_key": (key) })
         For i=1:1:$LENGTH(..#MODELS, ",") {

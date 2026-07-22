@@ -19,7 +19,7 @@ ClassMethod ResolveProvider(Output apiKey As %String, Output providerType As %St
         Write "  Set ^||ENV(""OPENAI_API_KEY"") = ""sk-...""", !
         Quit 0
     }
-    Set model = $SELECT(providerType = "anthropic": "claude-sonnet-4-5@20250929", 1: "gpt-4o")
+    Set model = $SELECT(providerType = "anthropic": "claude-sonnet-4-6", 1: "gpt-4o")
     Quit 1
 }
 

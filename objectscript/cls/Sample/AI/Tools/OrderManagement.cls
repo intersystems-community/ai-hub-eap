@@ -107,7 +107,7 @@ Method ListProducts(category As %String = "") As %DynamicObject
     }
 
     Set rows = []
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set entry = {}
         Set entry.name        = rs.%GetData(1)
         Set entry.category    = rs.%GetData(2)
@@ -116,6 +116,7 @@ Method ListProducts(category As %String = "") As %DynamicObject
         Set entry.description = rs.%GetData(5)
         Do rows.%Push(entry)
     }
+    If $$$ISERR(sc) Return {"error": ($SYSTEM.Status.GetErrorText(sc))}
     Return {"products": (rows), "count": (rows.%Size())}
 }
 
@@ -153,9 +154,10 @@ Method CreateOrder(customerName As %String, productName As %String, quantity As 
 
     // Derive next order reference from current row count
     Set stmt = ##class(%SQL.Statement).%New()
-    Do stmt.%Prepare("SELECT COUNT(*) FROM Sample_AI_Orders.CustomerOrder")
+    Set sc = stmt.%Prepare("SELECT COUNT(*) FROM Sample_AI_Orders.CustomerOrder")
+    If $$$ISERR(sc) Return {"error": ($SYSTEM.Status.GetErrorText(sc))}
     Set rs = stmt.%Execute()
-    Do rs.%Next()
+    If 'rs.%Next() Return {"error": "COUNT query returned no rows"}
     Set ref = "ORD-" _ $TRANSLATE($JUSTIFY(rs.%GetData(1) + 1, 3), " ", "0")
 
     Set order              = ##class(Sample.AI.Orders.Order).%New()
@@ -212,11 +214,12 @@ Method DeleteProduct(name As %String) As %DynamicObject
 
     // Refuse if there are open orders for this product
     Set stmt = ##class(%SQL.Statement).%New()
-    Do stmt.%Prepare(
+    Set sc = stmt.%Prepare(
         "SELECT COUNT(*) FROM Sample_AI_Orders.CustomerOrder"
         _ " WHERE Product = ? AND Status <> 'cancelled'")
+    If $$$ISERR(sc) Return {"error": ($SYSTEM.Status.GetErrorText(sc))}
     Set rs = stmt.%Execute(product.%Id())
-    Do rs.%Next()
+    If 'rs.%Next() Return {"error": "COUNT query returned no rows"}
     If rs.%GetData(1) > 0 {
         Return {"error": "Cannot delete: product has open (non-cancelled) orders", "name": (name)}
     }

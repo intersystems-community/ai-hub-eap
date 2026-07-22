@@ -16,7 +16,7 @@ Method ListLanguages() As %DynamicArray
     Set sc = stmt.%Prepare(sql)
     If $$$ISERR(sc) $$$ThrowStatus(sc)
     Set rs = stmt.%Execute()
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Do result.%Push({"name": (rs.%Get("Name")), "yearCreated": (rs.%Get("YearCreated"))})
     }
     Return result
@@ -67,8 +67,9 @@ Method SearchByTag(tag As %String) As %DynamicArray
     Set sql = "SELECT ID FROM Sample_AI_Proglang.ProgrammingLanguage ORDER BY Name"
     Set stmt = ##class(%SQL.Statement).%New()
     $$$ThrowOnError(stmt.%Prepare(sql))
+    Set sc = $$$OK
     Set rs = stmt.%Execute()
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set lang = ##class(Sample.AI.Proglang.Language).%OpenId(rs.%Get("ID"))
         For i=1:1:lang.Tags.Count() {
             If $ZCVT(lang.Tags.GetAt(i), "L") = $ZCVT(tag, "L") {
@@ -90,8 +91,9 @@ Method FindByFilter(filter As Sample.AI.Proglang.Filter) As %DynamicArray
     Set sql = "SELECT ID FROM Sample_AI_Proglang.ProgrammingLanguage ORDER BY Name"
     Set stmt = ##class(%SQL.Statement).%New()
     $$$ThrowOnError(stmt.%Prepare(sql))
+    Set sc = $$$OK
     Set rs = stmt.%Execute()
-    While rs.%Next() {
+    While rs.%Next(.sc) && $$$ISOK(sc) {
         Set lang = ##class(Sample.AI.Proglang.Language).%OpenId(rs.%Get("ID"))
 
         // Year range filter
