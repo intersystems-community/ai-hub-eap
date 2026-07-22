@@ -13,34 +13,19 @@ Class Sample.AI.Utils Extends %RegisteredObject
 ClassMethod GetEnvKey(varName As %String) As %String [ Private ]
 {
     Set val = $System.Util.GetEnviron(varName)
-    If val '= "" Quit val
-    Quit $Get(^||ENV(varName))
-}
-
-/// Map a provider name to its API key environment variable.
-/// Returns "" for providers that do not use a simple API key (vertex, bedrock).
-ClassMethod EnvVarForProvider(provider As %String) As %String [ Private ]
-{
-    Set lower = $ZCONVERT(provider, "L")
-    If lower = "openai"    Quit "OPENAI_API_KEY"
-    If lower = "anthropic" Quit "ANTHROPIC_API_KEY"
-    If lower = "gemini"    Quit "GEMINI_API_KEY"
-    If lower = "google"    Quit "GEMINI_API_KEY"
-    If lower = "grok"      Quit "GROK_API_KEY"
-    If lower = "meta"      Quit "META_API_KEY"
-    If lower = "nim"       Quit "NIM_API_KEY"
-    Quit ""
+    If val '= "" Return val
+    Return $Get(^||ENV(varName))
 }
 
 // --- Public API ------------------------------------------------------------------
 
-/// Return an API key for the given provider, or auto-detect from common providers.
+/// Return an API key for the given provider, or auto-detect from all known providers.
 ///
 /// Arguments:
-///   provider      - Optional provider name: openai, anthropic, gemini, grok, meta, nim.
+///   provider      - Optional provider name (openai, anthropic, gemini, grok, meta, nim, deepseek, openrouter, zai/glm, zhipu/bigmodel)
 ///                   If omitted or "", tries providers in priority order until a key is found.
 ///   foundProvider - Output. Set to the normalised provider name whose key was returned
-///                   (useful when provider="" to learn which was auto-detected).
+///                   
 ///
 /// Returns the key string, or "" if not found.
 ///
@@ -53,10 +38,10 @@ ClassMethod EnvVarForProvider(provider As %String) As %String [ Private ]
 ///   Set key = ##class(Sample.AI.Utils).GetAPIKey("openai")
 ///   If key = "" { Write "OPENAI_API_KEY not set", ! }
 ///
-///   // Auto-detect - also returns which provider was found
+///   // Auto-detect -- also returns which provider was found
 ///   Set key = ##class(Sample.AI.Utils).GetAPIKey("", .providerType)
 ///   If key = "" { Write "No API key found", ! }
-///   Else { Write "Using ", providerType, !}
+///   Else { Write "Using ", providerType, ! }
 ///
 ///   // To set a key without a shell restart:
 ///   Set ^||ENV("OPENAI_API_KEY") = "sk-..."
@@ -64,26 +49,42 @@ ClassMethod GetAPIKey(provider As %String = "", Output foundProvider As %String)
 {
     Set foundProvider = ""
 
+    // Provider name -> environment variable name
+    Set map("anthropic")  = "ANTHROPIC_API_KEY"
+    Set map("bigmodel")   = "ZHIPU_API_KEY"
+    Set map("deepseek")   = "DEEPSEEK_API_KEY"
+    Set map("gemini")     = "GEMINI_API_KEY"
+    Set map("glm")        = "ZAI_API_KEY"
+    Set map("google")     = "GEMINI_API_KEY"
+    Set map("meta")       = "META_API_KEY"
+    Set map("nim")        = "NIM_API_KEY"
+    Set map("openai")     = "OPENAI_API_KEY"
+    Set map("openrouter") = "OPENROUTER_API_KEY"
+    Set map("xai")        = "XAI_API_KEY"
+    Set map("zai")        = "ZAI_API_KEY"
+    Set map("zhipu")      = "ZHIPU_API_KEY"
+
+
     // Specific provider requested
     If provider '= "" {
-        Set envVar = ..EnvVarForProvider(provider)
-        If envVar = "" Quit ""
-        Set foundProvider = $ZCONVERT(provider, "L")
-        Quit ..GetEnvKey(envVar)
+        Set lower = $ZCONVERT(provider, "L")
+        Set envVar = $GET(map(lower))
+        If envVar = "" Return ""
+        Set foundProvider = lower
+        Return ..GetEnvKey(envVar)
     }
 
-    // Auto-detect: try common providers in priority order
+    // Auto-detect: try explicit providers in priority order
     Set key = ""
-    For p = "openai","anthropic","gemini","grok","meta","nim" {
-        Set envVar = ..EnvVarForProvider(p)
-        Set key = ..GetEnvKey(envVar)
+    For p = "openai","anthropic","gemini","xai","meta","nim","deepseek","openrouter","zai","zhipu" {
+        Set key = ..GetEnvKey($GET(map(p)))
         If key '= "" {
             Set foundProvider = p
             Quit
         }
         Set key = ""
     }
-    Quit key
+    Return key
 }
 
 }
