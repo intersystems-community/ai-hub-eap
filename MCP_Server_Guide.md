@@ -1266,7 +1266,8 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 1. Verify that the `SPECIFICATION` parameter on the MCP Service class is non-empty and references the correct class names.
 2. Confirm all listed tool/toolset classes are compiled in the correct IRIS namespace.
 3. Confirm the that the MCP server's **Namespace** matches where the classes are compiled.
-4. Run `iris-mcp-server` with `--log-level=debug` and look for the tool count logged during discovery — if it shows 0 tools, the issue is on the IRIS side (empty `SPECIFICATION`, uncompiled classes, or wrong namespace).
+4. Run `iris-mcp-server` with `--log-level=debug` and check the discovery log line for that endpoint. A failed discovery attempt now logs the actual error IRIS returned (e.g. a missing class name from an invalid `SPECIFICATION` entry), not just an HTTP status code — the detail usually points straight at the fix.
+5. If discovery instead fails with an identity-check error (endpoint "failed identity checking"), `iris-mcp-server` doesn't believe it's talking to `%AI.MCP.Service` at all — double check the **Dispatch Class** configured for that MCP server points at your `%AI.MCP.Service` subclass and not an unrelated REST endpoint.
 
 ### Tool Not Found
 
