@@ -41,18 +41,26 @@ $$$ThrowOnError(agent.%Init({"customerName": "Alice", "tier": "Gold"}))
 
 ### Session persistence and restore
 
-Saved sessions now restore automatically. Assigning a database-loaded session to `agent.Session` attaches it to the agent's conversation context without any extra reconstitution step:
+Saved sessions restore automatically. For declarative `%AI.Agent` subclasses the recommended path is `%InitWithSession`, which configures the agent from its class parameters and replays the saved conversation in one call:
 
 ```objectscript
-Set agent.Session = ##class(%AI.Agent.Session).%OpenId(id, , .sc)
+Set agent = ##class(MyApp.MyAgent).%New()
+Set session = ##class(%AI.Agent.Session).%OpenId(id, , .sc)
 $$$ThrowOnError(sc)
-// Ready to continue -- no additional setup needed
-Set response = agent.Chat(agent.Session, "Continue where we left off")
+$$$ThrowOnError(agent.%InitWithSession(session))
+// Ready to continue
+Set response = agent.Chat(session, "Continue where we left off")
+$$$ThrowOnError(session.%Save())
 ```
+For programmatic agents, call `%Init()` first then assign the loaded session to `agent.Session` — the assignment automatically reconnects the session to the live agent context.
 
 ### Provider naming: xAI
 
 The xAI (Grok) provider is now identified as `"xai"`. The alias `"grok"` still works for backwards compatibility, but `"xai"` is the canonical name.
+
+### Planning Skill (%AI.Skills.Planning)
+
+A new built-in skill that gives any agent structured long-task planning: a scratchpad for working notes and a hierarchical task list with a full create/start/complete/fail/block/cancel lifecycle. Add it with `agent.UseSkill("%AI.Skills.Planning")`. See the [Planning Skill](#planning-skill-aiskillsplanning) section for full details and a tool reference.
 
 ---
 
@@ -72,6 +80,7 @@ The xAI (Grok) provider is now identified as `"xai"`. The alias `"grok"` still w
     - [`%AI.Agent` - Execution Engine](#aiagent---execution-engine)
       - [Creating an Agent](#creating-an-agent)
       - [Configuring the Model](#configuring-the-model)
+      - [Controlling the Agentic Loop](#controlling-the-agentic-loop)
       - [Declarative Agent Configuration](#declarative-agent-configuration)
         - [Using Declarative Agents](#using-declarative-agents)
     - [%AI.Agent.Session - Session Management](#aiagentsession---session-management)
@@ -109,6 +118,7 @@ The xAI (Grok) provider is now identified as `"xai"`. The alias `"grok"` still w
       - [`%Decode` — inbound argument decoding](#decode--inbound-argument-decoding)
       - [`%Encode` — outbound return value encoding](#encode--outbound-return-value-encoding)
       - [Scope](#scope)
+  - [Building Agent Skills](#building-agent-skills) 
   - [Building ToolSets](#building-toolsets)
     - [ToolSet Structure](#toolset-structure)
     - [Including Other ToolSets](#including-other-toolsets)
@@ -161,7 +171,7 @@ InterSystems AI Hub is a comprehensive framework for building AI-powered applica
 
 The InterSystems AI Hub bridges the gap between ObjectScript applications and modern LLM providers. It allows you to:
 
-- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI, NVIDIA NIM, DeepSeek, OpenRouter
+- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI, NVIDIA NIM, DeepSeek, OpenRouter, GLM/Z.ai, Zhipu/BigModel
 - **Build AI agents** - Create autonomous agents that can use tools to accomplish complex tasks
 - **Define tools in ObjectScript** - Expose ObjectScript methods, SQL queries, and external services as tools
 - **Implement governance** - Control tool execution with authorization and audit policies
@@ -322,17 +332,19 @@ ClassMethod Create(name As %String, settings As %DynamicObject) As %AI.Provider
 
 | Provider | Name | Key Settings |
 |----------|------|--------------|
-| OpenAI | `"openai"` | `api_key`, `organization`, `base_url` (regional keys — e.g. `https://us.api.openai.com/v1`) |
+| OpenAI | `"openai"` | `api_key`, `org_id`, `base_url` (regional keys — e.g. `https://us.api.openai.com/v1`) |
 | Anthropic | `"anthropic"` | `api_key` |
 | Google Gemini | `"gemini"` | `api_key` |
-| Google Vertex AI | `"vertex"` | `project_id`, `region`, `service_account_path` |
+| Google Vertex AI | `"vertex"` | `project_id`, `region`, `service_account_path`, `service_account_json` |
 | AWS Bedrock | `"bedrock"` | `region` (SigV4) or `bearer_token` + `region` |
 | Meta Llama | `"meta"` | `api_key` |
 | xAI | `"xai"` (alias: `"grok"`) | `api_key` |
-| NVIDIA NIM | `"nim"` | `base_url` |
+| NVIDIA NIM | `"nim"` | `base_url`, `api_key` (optional) |
 | DeepSeek | `"deepseek"` | `api_key` |
 | OpenRouter | `"openrouter"` | `api_key`, `site_url`, `site_name` |
 | ollama | `"openai"` | `base_url`, `api_key` - see example below using their [openai compatibility](https://docs.ollama.com/api/openai-compatibility)  |
+| GLM / Z.ai | `"zai"` (alias: `"glm"`) | `api_key` |
+| Zhipu / BigModel | `"zhipu"` (alias: `"bigmodel"`) | `api_key` |
 
 **Example Usage:**
 
@@ -519,7 +531,7 @@ You can configure LLM parameters by passing in a `JSON` configuration object whe
 ```objectscript
 // Create session with model settings
 Set config = {
-    "max_iterations": 10,
+    "max_iterations": 10,        // Tool-call rounds per Chat() turn (0 = no hard cap)
     "temperature": 0.7,          // Randomness/creativity (0.0-2.0)
     "max_tokens": 1000,          // Maximum response length
     "top_p": 0.9,                // Nucleus sampling (0.0-1.0)
@@ -575,6 +587,32 @@ Set conciseConfig = {
     "stop_sequences": ["###", "END"]
 }
 ```
+#### Controlling the Agentic Loop
+
+`Run()` and the inner tool-call loop have independent iteration controls. Understanding both lets you tune an agent for simple conversational use or deep multi-step work.
+
+**`%AI.Agent.MaxIterations`** — the outer loop in `Run()`. Each iteration is one full turn: a prompt sent to the LLM and a response received. `Run()` keeps looping until the model produces a response with no tool calls (done) or `MaxIterations` is reached. Defaults to `10`. Set it to a value that covers the number of turns you expect:
+
+```objectscript
+Set agent.MaxIterations = 20   // allow up to 20 turns in Run()
+```
+
+**`max_iterations` in `CreateSession`** — the inner tool-call limit per `Chat()` call. Within a single turn, the model may call multiple tools before producing a final response. This cap limits how many back-and-forth tool rounds happen inside one turn. Pass `0` or omit it entirely to remove the hard cap:
+
+```objectscript
+Set session = agent.CreateSession({"max_iterations": 0})   // no inner cap
+```
+
+**Loop detection** — a safety mechanism that runs regardless of iteration limits. After each round of tool calls, the agent checks whether the tool calls and their results are producing new information. If the same pattern repeats without progress, it first injects a strategy nudge into the context to prompt the model to try a different approach. If repetition continues, it returns a `LoopDetected` error. This catches infinite loops that a hard iteration count would not catch (e.g. the model repeatedly calling a tool that returns the same error). Setting `max_iterations = 0` is safe precisely because loop detection is always active.
+
+**Choosing values:**
+
+| Use case | `MaxIterations` | `max_iterations` |
+|---|---|---|
+| Simple Q&A, no tools | 1 | 5 |
+| Agent with a few tools | 10 (default) | 10 (default) |
+| Planning skill, multi-step | 30–50 | 0 (no cap) |
+| Unknown complexity | 20–30 | 0 (no cap) |
 
 #### Declarative Agent Configuration
 
@@ -853,9 +891,9 @@ Set agent.SystemPrompt = "You are a helpful assistant."
 // Create session from agent - inherits model, prompt, and tools
 Set session = agent.CreateSession()
 
-// Optional: Pass configuration for caching, max iterations, model settings, etc.
+// Optional: Pass configuration for caching, iteration limits, model settings, etc.
 Set config = {
-    "max_iterations": 10,
+    "max_iterations": 10,     // tool-call rounds per Chat() turn; 0 = no hard cap
     "temperature": 0.7,
     "max_tokens": 1000,
     "top_p": 0.9,
@@ -1013,30 +1051,57 @@ Set `AutoCompactOnTokenLimit = 1` on the agent to trigger compaction automatical
 Set agent.AutoCompactOnTokenLimit = 1  // compact automatically instead of erroring
 ```
 
-**Exporting and importing session state:**
+**Saving and restoring sessions:**
 
-Sessions persist as database records (`%AI.Agent.Session` is a `%Persistent` class). You can also export the full session state as JSON for cross-process transfer or custom storage:
-
-```objectscript
-// Export as JSON string (messages, checkpoints, stats, summary)
-Set json = session.Export()
-
-// Later — restore into a new session
-$$$ThrowOnError(newSession.Import(json))
-```
-
-To load a persisted session from the database and reconnect it to a provider:
+`%AI.Agent.Session` is a `%Persistent` class. Call `%Save()` at any point during a conversation and the session state is written to the IRIS database. Subsequent saves are incremental — only new messages are appended.
 
 ```objectscript
-// Save to database
+// Save after each turn in a stateless REST handler
+Set response = agent.Chat(session, userMessage)
 $$$ThrowOnError(session.%Save())
-Set sessionId = session.%Id()
-
-// Later, in another process
-Set restored = ##class(%AI.Agent.Session).Load(sessionId, provider)
-Set response = agent.Chat(restored, "Continue where we left off")
+Set sessionId = session.%Id()   // store this for the next request
 ```
 
+To restore a saved session, load it from the database and reconnect it to an agent. Choose the pattern that matches how you created the agent:
+
+**Pattern 1 — declarative `%AI.Agent` subclasses** (recommended for REST handlers):
+
+```objectscript
+// Restore using %InitWithSession: configures the agent from its class parameters
+// and replays the saved conversation in one call.
+Set agent = ##class(MyApp.MyAgent).%New()
+Set session = ##class(%AI.Agent.Session).%OpenId(sessionId, , .sc)
+$$$ThrowOnError(sc)
+$$$ThrowOnError(agent.%InitWithSession(session))
+Set response = agent.Chat(session, "Continue where we left off")
+$$$ThrowOnError(session.%Save())
+```
+
+**Pattern 2 — programmatic agents** (when you build the agent imperatively):
+
+```objectscript
+// After %Init() is called, assigning a loaded session reconnects it automatically.
+Set agent = ##class(%AI.Agent).%New(provider)
+$$$ThrowOnError(agent.%Init())
+Set session = ##class(%AI.Agent.Session).%OpenId(sessionId, , .sc)
+$$$ThrowOnError(sc)
+Set agent.Session = session   // reconnects the session to the live agent
+Set response = agent.Chat(session, "Continue where we left off")
+$$$ThrowOnError(session.%Save())
+```
+
+**Exporting and importing session state as JSON:**
+
+`Export()` and `Import()` are for cross-instance transfer or storing sessions in an external system — they are not needed for normal within-IRIS persistence (use `%Save`/`%OpenId` for that).
+
+```objectscript
+// Export the full session as a JSON string
+Set json = session.Export()
+// -- transfer json across processes, store externally, etc. --
+
+// Import into a new live session (the session must already be active)
+Set newSession = agent.CreateSession()
+$$$ThrowOnError(newSession.Import(json))
 **Direct message editing:**
 
 For advanced use cases — injecting tool results, correcting facts, building training data — you can read and modify individual messages:
@@ -1167,7 +1232,7 @@ The tool exposes a single `web_search(query, count?)` function. It returns:
 
 `rust:shell` — shell command execution with background task support.
 
-**Authorization required.** The shell tool sets `requires_auth: true` — agents cannot call it unless an authorization policy is configured. Without a policy the tool is unavailable to the LLM. Use `%AI.Policy.InteractiveAuth` for interactive sessions or write a custom `%AI.Policy.Authorization` subclass for programmatic approval rules.
+**Authorization required.** The shell tool sets `requires_auth: true` — agents cannot call it unless an authorization policy is configured. Without a policy the tool is unavailable to the LLM. Use `%AI.Policy.ConsoleAuth` for interactive sessions or write a custom `%AI.Policy.Authorization` subclass for programmatic approval rules.
 
 **Stateful tool.** The shell tool maintains working-directory state and background-task state in the process instance that handled the `AddTool` call. Subsequent calls to `task_io`, `terminate_task`, and `list_tasks` must reach the same process instance. When deploying behind a CSP job pool or REST gateway, the session must use a dedicated (non-shared) connection — i.e. the MCP WebSocket endpoint rather than the stateless REST endpoint.
 
@@ -1175,7 +1240,7 @@ The tool exposes a single `web_search(query, count?)` function. It returns:
 // Add shell tools (bash, terminate_task, task_io, list_tasks, change_directory, ...)
 // Authorization policy required — the LLM cannot call the shell without one.
 Do agent.ToolManager.AddTool("rust:shell")
-Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.InteractiveAuth).%New())
+Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.ConsoleAuth).%New())
 ```
 
 The shell tool exposes:
@@ -1191,6 +1256,11 @@ The shell tool exposes:
 
 When `bash` is called with `run_in_background: true`, the command runs asynchronously and returns a `task_id`. Use `task_io` to stream output and `terminate_task` to stop it. Task IDs are random (UUID-based) and scoped to the shell provider instance — tasks cannot be accessed from a different agent or a different process.
 
+`rust:hexdump` — binary data inspection. Exposes a single `hexdump(data)` tool that renders base64-encoded binary data as a color-coded hex + ASCII dump. Pass the bytes as a base64 string (e.g. read the file with a binary-capable tool and encode before calling). Useful for agents inspecting binary formats, protocol captures, or serialized data.
+
+```objectscript
+Do agent.ToolManager.AddTool("rust:hexdump")
+```
 
 #### Tool Policies
 
@@ -1200,7 +1270,7 @@ When `bash` is called with `run_in_background: true`, the command runs asynchron
 
 ```objectscript
 // Authorization policy
-Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.InteractiveAuth).%New())
+Do agent.ToolManager.SetAuthPolicy(##class(%AI.Policy.ConsoleAuth).%New())
 
 // Audit policy
 Do agent.ToolManager.SetAuditPolicy(##class(%AI.Policy.ConsoleAudit).%New())
@@ -1987,6 +2057,278 @@ Method %Encode(toolname As %String, rv As %Any) As %Any
 #### Scope
 
 Both hooks receive the tool name, so a single override can handle all tools uniformly, branch per-tool, or delegate most cases to `##super`. Because `%AI.ToolSet` inherits from `%AI.Tool`, the same override pattern works in both plain tool classes and ToolSets.
+
+### Building Agent Skills
+(%AI.Agent.Skill)
+A **Skill** is a packaged combination of instructions and tools that can be loaded into an agent. It extends `%AI.ToolSet` -- when you add a skill to an agent, its `XData INSTRUCTIONS` text is merged into the system prompt and its `TOOLS` are registered directly in the tool catalog. The LLM calls the skill's tools natively; there is no intermediate dispatch wrapper.
+
+#### Defining a Skill (ObjectScript subclass)
+
+```objectscript
+Class MyApp.Skill.SummarizeDocument Extends %AI.Agent.Skill
+{
+    /// ToolSet classes whose tools this skill contributes (comma-separated)
+    Parameter TOOLS = "MyApp.Tools.FileSystem";
+
+    XData SUMMARY [ MimeType = "text/yaml" ]
+    {
+name: summarize-document
+description: Summarize a document from the filesystem. Returns a concise summary.
+tags:
+  - summarization
+  - documents
+    }
+
+    XData INSTRUCTIONS [ MimeType = "text/markdown" ]
+    {
+## Document Summarization
+
+When asked to summarize a document:
+1. Read the file using the filesystem tools.
+2. Produce a clear, concise summary under 200 words.
+3. Focus on key points and main conclusions.
+    }
+}
+```
+
+**Key elements:**
+- `TOOLS` parameter -- comma-separated ToolSet class names. Their tools are added to the agent's catalog.
+- `XData SUMMARY` -- YAML metadata: `name`, `description`, `parameters`, `tags`, `dependencies`, `author`, `version`.
+- `XData INSTRUCTIONS` -- Markdown appended to the agent's system prompt. Write this as guidance for when and how to use the skill's tools.
+
+#### Adding a Skill to an Agent
+
+```objectscript
+Set apiKey = ##class(Sample.AI.Utils).GetAPIKey("", .providerType)
+Set provider = ##class(%AI.Provider).Create(providerType, {"api_key": (apiKey)})
+
+Set agent = ##class(%AI.Agent).%New(provider)
+Set agent.Model = provider.GetModel()
+Set agent.SystemPrompt = "You are a project assistant."
+
+// Add the skill -- its instructions merge into the system prompt,
+// its tools are registered in the tool catalog
+$$$ThrowOnError(agent.UseSkill("MyApp.Skill.SummarizeDocument"))
+
+Set session = agent.CreateSession()
+Set response = agent.Chat(session, "Summarize the file at /data/report.pdf")
+Write response.Content
+```
+
+#### Loading Skills on a Declarative Agent
+
+Declarative `%AI.Agent` subclasses can list skills in the `SKILLS` parameter. They are loaded automatically by `%Init()`:
+
+```objectscript
+Class MyApp.Agent.ProjectAssistant Extends %AI.Agent
+{
+    Parameter PROVIDER = "anthropic";
+    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter SKILLS   = "MyApp.Skill.SummarizeDocument,MyApp.Skill.CreatePR";
+
+    XData INSTRUCTIONS [ MimeType = "text/markdown" ]
+    {
+You are a project assistant. Use your skills to handle specialized tasks.
+    }
+}
+
+// Skills are loaded automatically by %Init()
+Set agent = ##class(MyApp.Agent.ProjectAssistant).%New()
+$$$ThrowOnError(agent.%Init())
+Set session = agent.CreateSession()
+Set response = agent.Chat(session, "Summarize /data/report.pdf and then create a PR")
+```
+
+**Sigil inheritance** -- subclasses can add to or remove from an inherited skill set using `+`/`-`/`!` prefixes on each entry:
+
+```objectscript
+Parameter SKILLS = "MyApp.Skill.ExtraSkill";          // add to inherited set
+Parameter SKILLS = "-MyApp.Skill.SummarizeDocument";  // remove one inherited skill
+Parameter SKILLS = "!MyApp.Skill.ExtraSkill";         // reset then add
+Parameter SKILLS = "!";                               // opt out of all inherited skills
+```
+
+#### Loading a Skill from an External URI
+
+Skills can also be loaded from external `SKILL.md` files -- useful for sharing skills across projects or loading from a git repository:
+
+```objectscript
+// From a git repository
+Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("https://github.com/myorg/skills", "summarize")
+
+// From a local path
+Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("file:///opt/skills/summarize")
+
+// Add to the agent
+$$$ThrowOnError(agent.UseSkill(skill))
+```
+
+A `SKILL.md` file uses YAML front matter followed by Markdown instructions:
+
+```markdown
+---
+name: summarize-document
+description: Summarize a document from the filesystem.
+tags:
+  - summarization
+---
+
+## Document Summarization
+
+When asked to summarize a document, read the file and produce a concise summary under 200 words.
+```
+
+#### Exporting a Skill
+
+```objectscript
+Set skill = ##class(MyApp.Skill.SummarizeDocument).%New()
+
+// Export to a directory (creates /opt/skills/summarize-document/SKILL.md)
+Set path = skill.ExportSkill("/opt/skills")
+Write "Exported to: ", path, !
+
+// Export to a specific file
+Set path = skill.ExportSkill("/opt/skills/summarize.md")
+
+// Export to a stream
+Set stream = ##class(%Stream.GlobalCharacter).%New()
+Do skill.ExportSkill(stream)
+```
+
+#### Skill vs. SubAgent
+
+| | `%AI.Agent.SubAgent` | `%AI.Agent.Skill` |
+|---|---|---|
+| **Definition** | Subclass + `GetSystemPrompt()` override | Subclass + `SUMMARY`/`INSTRUCTIONS` XData |
+| **How it works** | Spawns a child agent to handle the request | Injects instructions + tools into the parent agent |
+| **Tool access** | Sub-agent has its own tool catalog | Tools go directly into the parent's catalog |
+| **External source** | No | Yes -- `GetSkillFromURI()` |
+| **Export** | No | Yes -- `ExportSkill()` |
+
+Use `%AI.Agent.SubAgent` when you want a completely isolated agent with its own conversation context and tool set. Use `%AI.Agent.Skill` when you want to augment a parent agent's capabilities with a reusable, shareable set of instructions and tools.
+
+### Planning Skill (%AI.Skills.Planning)
+
+`%AI.Skills.Planning` is a built-in stateful skill that gives an agent structured long-task planning capabilities: a scratchpad for working notes and a hierarchical task list with a full lifecycle. Add it to any agent with `UseSkill` and the agent will automatically use the planning protocol for complex, multi-step work.
+
+#### Adding the Skill
+
+```objectscript
+Set provider = ##class(%AI.Provider).Create("openai", {"api_key": apiKey})
+Set agent = ##class(%AI.Agent).%New(provider)
+$$$ThrowOnError(agent.UseSkill("%AI.Skills.Planning"))
+$$$ThrowOnError(agent.%Init())
+
+Set session = agent.CreateSession()
+Set response = agent.Run(session, "Research, outline, and draft a short report on IRIS vector search.")
+Write response.Content
+```
+
+Or declaratively:
+
+```objectscript
+Class MyApp.Agent.Planner Extends %AI.Agent
+{
+    Parameter PROVIDER = "anthropic";
+    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter SKILLS   = "%AI.Skills.Planning";
+}
+```
+
+#### How it Works
+
+The skill injects a planning protocol into the agent's system prompt. For any non-trivial request the agent is instructed to:
+
+1. **Clarify** -- if the goal is ambiguous, ask clarifying questions before creating tasks.
+2. **Plan** -- call `ResetPlan` with the goal, `WriteScratchpad` with approach notes, then create tasks with `AppendTask` or `InsertTask`.
+3. **Execute** -- work through tasks sequentially: `StartTask`, do the work, `CompleteTask` (or `FailTask`/`BlockTask`). Only one task is `in_progress` at a time.
+4. **Verify** -- before responding, confirm no tasks remain `pending`, `in_progress`, `blocked`, or `failed`.
+
+The scratchpad is private working memory -- the agent keeps evolving notes there without cluttering the conversation.
+
+#### Task IDs
+
+Tasks use decimal IDs that define both hierarchy and execution order:
+
+```
+1         -- first top-level task
+1.1       -- first subtask of task 1 (runs before 1.2 and 2)
+1.2       -- second subtask of task 1
+2         -- second top-level task
+2.3.1     -- deep subtask
+```
+
+`AppendTask` assigns the next available ID automatically. `InsertTask` places a task at an explicit position. Every task -- including parents -- must be independently actionable; parent tasks are not headings.
+
+#### Tool Reference
+
+| Tool | Description |
+|------|-------------|
+| `ResetPlan(goal, keepScratchpad?)` | Clear all tasks and set a new goal. Call at the start of each new problem. |
+| `WriteScratchpad(content)` | Replace working notes. Keep concise: goal, constraints, approach, next action. |
+| `ReadScratchpad()` | Return current scratchpad content. |
+| `AppendTask(content, parentId?)` | Add a pending task at the end of the current level (or under `parentId`). |
+| `InsertTask(id, content)` | Insert a task at a specific decimal position (parent must exist first). |
+| `UpdateTaskDescription(id, content)` | Revise task wording without changing its status or history. |
+| `StartTask(id)` | Mark a task `in_progress`. Enforces single-active discipline -- rejects if another task is already active. Clears any `blocker` field. |
+| `CompleteTask(id, result?, verification?)` | Mark `in_progress` task done. Record what was produced and how it was verified. |
+| `FailTask(id, reason?)` | Mark `in_progress` task failed. Increments a failure counter; after three failures the response prompts escalation rather than blind retry. |
+| `BlockTask(id, blocker)` | Mark a task blocked by an external dependency. Call `StartTask` to resume once resolved. |
+| `CancelTask(id, reason?)` | Mark a task cancelled. Use `InsertTask` or `AppendTask` to create a replacement if needed. |
+| `GetTask(id)` | Fetch a single task by ID. |
+| `ListTasks(status?, parentId?, includeDescendants?, offset?, limit?)` | Paginated, filterable task list. `includeDescendants` (default true) controls whether all descendants or only direct children of `parentId` are returned. Prefer `GetPlanStatus` for routine status checks. |
+| `GetPlanStatus(includeScratchpad?)` | Compact dashboard: task counts by status, current `in_progress` task, next `pending` task. Use before choosing the next action in a large plan. |
+
+#### Iteration Budget
+
+The planning protocol makes multiple tool calls per task (at minimum: `StartTask` + `CompleteTask`), so agents using this skill need more agentic-loop iterations than a simple chat agent.
+
+`%AI.Agent.MaxIterations` controls how many times `Run()` calls `Chat()` (the outer loop). It defaults to 10 — keep it at a positive number suited to the number of tasks you expect.
+
+`max_iterations` in `CreateSession` controls the inner tool-call loop within each `Chat()`. Pass `0` or omit it entirely to remove that inner cap and rely on the agent's loop-detection mechanism instead:
+
+```objectscript
+// Outer loop: allow Run() to call Chat() up to 30 times (one per planning step or task)
+Set agent.MaxIterations = 30
+
+// Inner loop: no hard cap per Chat() call -- loop detection stops runaway tool calls
+Set session = agent.CreateSession({"max_iterations": 0})
+```
+
+#### Inspecting Plan State After a Run
+
+Because the planning skill is `STATEFUL`, the same instance is reused for every tool call. Create it yourself and pass it directly to the ToolManager to retain a live reference for post-run inspection:
+
+```objectscript
+Set agent = ##class(%AI.Agent).%New(provider)
+
+// Inject INSTRUCTIONS manually and add the instance directly
+Set xdata = ##class(%Dictionary.XDataDefinition).%OpenId("%AI.Skills.Planning||INSTRUCTIONS")
+If $ISOBJECT(xdata) {
+    Set instr = ""
+    Do xdata.Data.Rewind()
+    While 'xdata.Data.AtEnd { Set instr = instr _ xdata.Data.ReadLine() _ $C(10) }
+    Set agent.SkillInstructions = $ZSTRIP(instr, "<>W")
+}
+Set planning = ##class(%AI.Skills.Planning).%New()
+$$$ThrowOnError(agent.ToolManager.AddTool(planning))
+$$$ThrowOnError(agent.%Init())
+
+Set session = agent.CreateSession()
+Do agent.Run(session, "...")
+
+// Inspect the plan the agent built
+Set status = planning.GetPlanStatus()
+Write "Goal: ", status.goal, !
+Write "Total tasks: ", status.counts.total, !
+Write "Done: ", status.counts.done, !
+
+Set tasks = planning.ListTasks().tasks
+Set iter = tasks.%GetIterator()
+While iter.%GetNext(.i, .task) {
+    Write task.id, " [", task.status, "] ", task.content, !
+}
+```
 
 ## Building ToolSets
 
