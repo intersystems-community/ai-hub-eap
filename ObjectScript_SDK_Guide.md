@@ -3,27 +3,30 @@
 > [!IMPORTANT]
 > Please note this is prerelease software, and any APIs and functionality described in this document is subject to change without prior notice before the initial GA release of the AI Hub.
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 ## What's New in This Guide
 
 This section summarises the user-facing changes in this cycle that affect how you write code. Internal improvements (performance, security hardening, bug fixes) are covered in the separate release notes.
 
-### Skills are now toolsets, not sub-agents
+### Progressive-disclosure skills
 
-The Skills API has been redesigned. A `%AI.Agent.Skill` now extends `%AI.ToolSet` rather than spawning a sub-agent. When you add a skill to an agent, it contributes its `XData INSTRUCTIONS` text to the system prompt and registers its `TOOLS` directly into the tool catalog. The LLM calls the skill's tools natively -- there is no intermediate `Execute` wrapper call.
+Skills no longer inject their instructions and tools into an agent as soon as they're added. `UseSkill()` (and the `SKILLS` parameter) now register a skill's name, description, and tool list as catalog metadata only -- its full instructions and tools stay hidden from the model until the model activates the skill on demand via a builtin `load_skill` tool. This keeps the system prompt and tool schema lean when an agent has several skills registered but only needs one or two in a given conversation.
 
 **What you need to change if you used the old API:**
 
-- Remove any `Set skill.ParentAgent = agent` lines -- the `ParentAgent` property no longer exists.
-- Remove any direct `skill.%Invoke("Execute", args)` calls -- skills no longer present an `Execute` tool. Use `agent.Chat(session, ...)` as you would for any other tool call.
-- The skill's `TOOLS` parameter still works the same way; those toolsets are now loaded into the parent agent's tool catalog rather than a sub-agent.
+- `agent.SkillInstructions` no longer exists. If you need a skill's instructions to always be present -- bypassing progressive disclosure, e.g. a stateful skill added directly via `ToolManager.AddTool` rather than `UseSkill` -- fold them into `agent.SystemPrompt` instead.
+- Nothing else changes at the call site. `UseSkill()`, the `SKILLS` parameter, and `Chat()`/`Run()` all work exactly as before; the LLM handles calling `load_skill` itself, so you don't need to check or manage activation state manually.
 
-See the [Skills](#skills-aiagentskill) section for the updated API and examples.
+See the updated [Skills](#skills-aiagentskill) section for the full model and examples.
+
+### New provider: Kimi (Moonshot AI)
+
+Kimi (Moonshot AI), including the newly released `kimi-k3`, is now a supported provider: `##class(%AI.Provider).Create("kimi", {"api_key": "..."})` (alias: `"moonshot"`). Kimi's models are open-weight, so `base_url` can point at a self-hosted server or another OpenAI-compatible endpoint instead of Moonshot's own hosted API. See the provider table in [Core Components](#aiprovider---llm-provider-interface) for details.
 
 ### `SKILLS` parameter on declarative agents
 
-Declarative `%AI.Agent` subclasses now support a `SKILLS` parameter alongside `TOOLSETS`. Skills listed here are loaded automatically by `%Init()` and their instructions are merged into the system prompt:
+Declarative `%AI.Agent` subclasses now support a `SKILLS` parameter alongside `TOOLSETS`. Skills listed here are loaded automatically by `%Init()` and registered as available -- their instructions and tools become visible once the model activates them (see [Progressive-disclosure skills](#progressive-disclosure-skills) above):
 
 ```objectscript
 Parameter SKILLS = "MyApp.Skill.CreatePR,MyApp.Skill.ReviewCode";
@@ -171,7 +174,7 @@ InterSystems AI Hub is a comprehensive framework for building AI-powered applica
 
 The InterSystems AI Hub bridges the gap between ObjectScript applications and modern LLM providers. It allows you to:
 
-- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI, NVIDIA NIM, DeepSeek, OpenRouter, GLM/Z.ai, Zhipu/BigModel
+- **Integrate multiple LLM providers** - OpenAI, Anthropic, Google (Gemini/Vertex), AWS Bedrock, Meta, xAI, NVIDIA NIM, Kimi/Moonshot AI, DeepSeek, OpenRouter, GLM/Z.ai, Zhipu/BigModel
 - **Build AI agents** - Create autonomous agents that can use tools to accomplish complex tasks
 - **Define tools in ObjectScript** - Expose ObjectScript methods, SQL queries, and external services as tools
 - **Implement governance** - Control tool execution with authorization and audit policies
@@ -341,6 +344,7 @@ ClassMethod Create(name As %String, settings As %DynamicObject) As %AI.Provider
 | xAI | `"xai"` (alias: `"grok"`) | `api_key` |
 | NVIDIA NIM | `"nim"` | `base_url`, `api_key` (optional) |
 | DeepSeek | `"deepseek"` | `api_key` |
+| Kimi (Moonshot AI) | `"kimi"` (alias: `"moonshot"`) | `api_key`, `base_url` (open-weight -- points at Moonshot's hosted API by default, or a self-hosted/alternate OpenAI-compatible endpoint) |
 | OpenRouter | `"openrouter"` | `api_key`, `site_url`, `site_name` |
 | ollama | `"openai"` | `base_url`, `api_key` - see example below using their [openai compatibility](https://docs.ollama.com/api/openai-compatibility)  |
 | GLM / Z.ai | `"zai"` (alias: `"glm"`) | `api_key` |
@@ -379,20 +383,23 @@ Set provider = ##class(%AI.Provider).Create("bedrock", {
 // Note: bearer token mode requires cross-region inference profile IDs
 // (e.g. "us.anthropic.claude-3-5-sonnet-20241022-v2:0") rather than
 // raw model IDs.  ListModels() is not supported in bearer token mode.
-
-// ollama offers an OpenAI compatible API (https://docs.ollama.com/api/openai-compatibility).
-// Note that it requires a dummy API key value
-Set provider = ##class(%AI.Provider).Create("openai", { 
-    "base_url": "http://localhost:11434/v1/", 
-    "api_key": "ollama" 
-})
-
 // Note: Bedrock API keys are region-specific.  The "region" value must
 // match the region where the key was generated in the Bedrock console.
 
 // DeepSeek
 Set provider = ##class(%AI.Provider).Create("deepseek", {
     "api_key": "sk-..."
+})
+
+// Kimi (Moonshot AI) -- hosted API by default
+Set provider = ##class(%AI.Provider).Create("kimi", {
+    "api_key": "sk-..."
+})
+
+// Kimi -- self-hosted / alternate OpenAI-compatible endpoint (open-weight model)
+Set provider = ##class(%AI.Provider).Create("kimi", {
+    "api_key": "not-needed-for-local-servers",
+    "base_url": "http://localhost:8000/v1/"
 })
 
 // OpenRouter — api_key is required; site_url and site_name are optional identity
@@ -553,9 +560,11 @@ The following table gives general guidelines for model settings:
 | Parameter | Range | Best For |
 |-----------|-------|----------|
 | **temperature: 0.0-0.3** | Low | Factual Q&A, data extraction, consistent outputs |
-| **temperature: 0.4-0.7** | Medium | General purpose (default: 0.7) |
+| **temperature: 0.4-0.7** | Medium | General purpose |
 | **temperature: 0.8-1.2** | High | Creative writing, brainstorming |
 | **temperature: 1.3-2.0** | Very High | Experimental, may be incoherent |
+
+Temperature` has no default -- if you don't set it, no `temperature` field is sent at all and the provider applies its own default. Leave it unset unless you have a specific reason to override it: some models (reasoning models on several providers, and Kimi's `kimi-k3`/`kimi-k2.x`) reject any explicit value other than their fixed default and return an API error.
 | **max_tokens** | > 0 | Limits response length, controls costs |
 | **top_p: 0.8-1.0** | High | More diverse responses |
 | **top_p: 0.1-0.7** | Low | More focused, deterministic |
@@ -2106,13 +2115,36 @@ Set agent = ##class(%AI.Agent).%New(provider)
 Set agent.Model = provider.GetModel()
 Set agent.SystemPrompt = "You are a project assistant."
 
-// Add the skill -- its instructions merge into the system prompt,
-// its tools are registered in the tool catalog
+// Add the skill -- it's now *available*, but its instructions and tools
+// stay hidden until the model activates it (see "Activating a Skill" below)
 $$$ThrowOnError(agent.UseSkill("MyApp.Skill.SummarizeDocument"))
 
 Set session = agent.CreateSession()
 Set response = agent.Chat(session, "Summarize the file at /data/report.pdf")
 Write response.Content
+```
+
+#### Activating a Skill
+
+The model activates an available skill itself, on demand, by calling a builtin `load_skill` tool with the skill's name -- you don't call it or manage activation state yourself. Once activated for a session:
+
+- The skill's full `XData INSTRUCTIONS` are added to the prompt for the rest of that session.
+- Its tools become visible in the tool schema and callable by the model.
+
+Activation is per-session and lasts for that session's lifetime (it survives further turns and `%Save()`/reload, but a brand-new session starts with nothing activated, even for the same agent). Registered-but-inactive tools still exist in the `ToolManager` -- `%Discover()` and other static introspection still report the full surface -- only the per-turn request sent to the model is filtered.
+
+To inspect activation state (useful for debugging or logging):
+
+```objectscript
+// Skills registered on this session, whether activated or not
+Set available = session.AvailableSkills
+Set iter = available.%GetIterator()
+While iter.%GetNext(.i, .skill) { Write skill.name, " -- ", skill.description, ! }
+
+// Skills the model has actually activated so far
+Set active = session.ActiveSkills
+Set iter = active.%GetIterator()
+While iter.%GetNext(.i, .skill) { Write skill.name, " activated at ", skill.activated_at, ! }
 ```
 
 #### Loading Skills on a Declarative Agent
@@ -2200,8 +2232,8 @@ Do skill.ExportSkill(stream)
 | | `%AI.Agent.SubAgent` | `%AI.Agent.Skill` |
 |---|---|---|
 | **Definition** | Subclass + `GetSystemPrompt()` override | Subclass + `SUMMARY`/`INSTRUCTIONS` XData |
-| **How it works** | Spawns a child agent to handle the request | Injects instructions + tools into the parent agent |
-| **Tool access** | Sub-agent has its own tool catalog | Tools go directly into the parent's catalog |
+| **How it works** | Spawns a child agent to handle the request | Registers instructions + tools with the parent agent, revealed to the model once it activates the skill via `load_skill` |
+| **Tool access** | Sub-agent has its own tool catalog | Tools go directly into the parent's catalog (hidden until activation) |
 | **External source** | No | Yes -- `GetSkillFromURI()` |
 | **Export** | No | Yes -- `ExportSkill()` |
 
@@ -2302,13 +2334,17 @@ Because the planning skill is `STATEFUL`, the same instance is reused for every 
 ```objectscript
 Set agent = ##class(%AI.Agent).%New(provider)
 
-// Inject INSTRUCTIONS manually and add the instance directly
+// Adding the instance directly via ToolManager.AddTool (rather than UseSkill)
+// bypasses progressive disclosure entirely, so fold INSTRUCTIONS directly into
+// the base system prompt instead -- there's no available/active skill entry
+// to activate later.
 Set xdata = ##class(%Dictionary.XDataDefinition).%OpenId("%AI.Skills.Planning||INSTRUCTIONS")
 If $ISOBJECT(xdata) {
     Set instr = ""
     Do xdata.Data.Rewind()
     While 'xdata.Data.AtEnd { Set instr = instr _ xdata.Data.ReadLine() _ $C(10) }
-    Set agent.SkillInstructions = $ZSTRIP(instr, "<>W")
+   Set sep = $SELECT(agent.SystemPrompt '= "": $C(10,10), 1: "")
+   Set agent.SystemPrompt = agent.SystemPrompt _ sep _ $ZSTRIP(instr, "<>W")
 }
 Set planning = ##class(%AI.Skills.Planning).%New()
 $$$ThrowOnError(agent.ToolManager.AddTool(planning))
