@@ -8,7 +8,8 @@ ClassMethod DemoEcho() As %Status
     Write !, "=== Echo Skill Demo ===", !
 
     Try {
-        Set provider = ##class(%AI.Provider).Create("anthropic")
+        Set apiKey = ##class(Sample.AI.Utils).GetAPIKey("anthropic")
+        Set provider = ##class(%AI.Provider).Create("anthropic", {"api_key": (apiKey)})
 
         Set agent = ##class(%AI.Agent).%New(provider)
         Set agent.Model = "claude-sonnet-4-6"
@@ -41,7 +42,8 @@ ClassMethod DemoCreatePR() As %Status
     Write !, "=== CreatePR Skill Demo ===", !
 
     Try {
-        Set provider = ##class(%AI.Provider).Create("anthropic")
+        Set apiKey = ##class(Sample.AI.Utils).GetAPIKey("anthropic")
+        Set provider = ##class(%AI.Provider).Create("anthropic", {"api_key": (apiKey)})
 
         Set agent = ##class(%AI.Agent).%New(provider)
         Set agent.Model = "claude-sonnet-4-6"
