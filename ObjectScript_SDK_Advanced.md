@@ -760,25 +760,20 @@ Deep delegation or many parallel delegations multiply API costs. To mitigate thi
 
 ## Skills (%AI.Agent.Skill)
 
-A **Skill** is a declaratively-defined sub-agent that can be registered as a tool. It extends `%AI.Agent.SubAgent` and adds structured metadata (name, description, parameters, dependencies) via XData blocks. When a parent agent registers a Skill as a tool, it appears with the Skill's description so the LLM knows what it does and when to invoke it.
+A **Skill** is a packaged combination of instructions and tools that can be loaded into an agent. It extends `%AI.ToolSet`. Skills use **progressive disclosure**: adding a skill to an agent registers it as available -- only its name and description are visible to the model up front -- but its full `XData INSTRUCTIONS` and its tools stay hidden until the model activates it. This keeps the prompt and tool schema lean for agents with many skills registered but only one or two relevant to any given conversation.
 
 ### Defining a Skill (ObjectScript subclass)
 
 ```objectscript
 Class MyApp.Skill.SummarizeDocument Extends %AI.Agent.Skill
 {
-    /// ToolSet classes to add to this skill's sub-agent (comma-separated)
+    /// ToolSet classes whose tools this skill contributes (comma-separated)
     Parameter TOOLS = "MyApp.Tools.FileSystem";
 
     XData SUMMARY [ MimeType = "text/yaml" ]
     {
 name: summarize-document
 description: Summarize a document from the filesystem. Returns a concise summary.
-parameters:
-  - name: userRequest
-    description: Path and any summarization instructions
-    type: string
-    required: true
 tags:
   - summarization
   - documents
@@ -786,42 +781,117 @@ tags:
 
     XData INSTRUCTIONS [ MimeType = "text/markdown" ]
     {
-You are a document summarization specialist.
-When given a file path, read the file and produce a clear, concise summary.
-Focus on key points and main conclusions. Keep the summary under 200 words.
+## Document Summarization
+
+When asked to summarize a document:
+1. Read the file using the filesystem tools.
+2. Produce a clear, concise summary under 200 words.
+3. Focus on key points and main conclusions.
     }
 }
 ```
 
 **Key elements:**
-- `TOOLS` parameter — comma-separated ToolSet class names added to the skill's sub-agent automatically
-- `XData SUMMARY` — YAML metadata: `name`, `description`, `parameters`, `tags`, `dependencies`, `author`, `version`
-- `XData INSTRUCTIONS` — Markdown system prompt for the sub-agent
-- The `description` field becomes the LLM-visible tool description when the skill is registered with a parent agent
+- `TOOLS` parameter -- comma-separated ToolSet class names. Their tools are added to the agent's catalog.
+- `XData SUMMARY` -- YAML metadata: `name`, `description`, `parameters`, `tags`, `dependencies`, `author`, `version`.
+- `XData INSTRUCTIONS` -- Markdown appended to the agent's system prompt. Write this as guidance for when and how to use the skill's tools.
 
-### Registering a Skill with an Agent
+### Adding a Skill to an Agent
 
 ```objectscript
 Set apiKey = ##class(Sample.AI.Utils).GetAPIKey("", .providerType)
 Set provider = ##class(%AI.Provider).Create(providerType, {"api_key": (apiKey)})
 
 Set agent = ##class(%AI.Agent).%New(provider)
-Set agent.Model = provider.GetDefaultModel()
-Set agent.SystemPrompt = "You are a project assistant. Use your skills to handle specialized tasks."
+Set agent.Model = provider.GetModel()
+Set agent.SystemPrompt = "You are a project assistant."
 
-// Register skill as a tool — the LLM sees its description and calls it when appropriate
-Set skill = ##class(MyApp.Skill.SummarizeDocument).%New()
-Set skill.ParentAgent = agent
-Do agent.ToolManager.AddTool(skill)
+// Add the skill -- it's now *available*, but its instructions and tools
+// stay hidden until the model activates it (see "Activating a Skill" below)
+$$$ThrowOnError(agent.UseSkill("MyApp.Skill.SummarizeDocument"))
 
 Set session = agent.CreateSession()
 Set response = agent.Chat(session, "Summarize the file at /data/report.pdf")
 Write response.Content
 ```
 
+### Adding a Skill Mid-Conversation
+
+`UseSkill()` doesn't have to happen up front -- it can be called at any time, including after `CreateSession()`. If the agent's current session (the one most recently returned by `CreateSession()`, or manually reconnected via `agent.Session = ...`) is still live, the newly-registered skill is pushed into it immediately, so the model can activate it via `load_skill` on its very next turn:
+
+```objectscript
+Set session = agent.CreateSession()
+Set response = agent.Chat(session, "Summarize /data/report.pdf")
+
+// Register a new skill mid-conversation -- e.g. unlocked by a permission
+// change, or surfaced by a RAG-based skill-discovery step.
+$$$ThrowOnError(agent.UseSkill("MyApp.Skill.CreatePR"))
+
+// The model can activate MyApp.Skill.CreatePR starting on this next turn.
+Set response = agent.Chat(session, "Now create a PR with those changes")
+```
+
+If an agent has multiple sessions in flight (e.g. one per end user), only the session most recently created or reconnected is updated this way -- an older session won't see the new skill until you call `UseSkill()` again while that session is current, or it starts a fresh session.
+
+### Activating a Skill
+
+The model activates an available skill itself, on demand, by calling a builtin `load_skill` tool with the skill's name -- you don't call it or manage activation state yourself. Once activated for a session:
+
+- The skill's full `XData INSTRUCTIONS` are added to the prompt for the rest of that session.
+- Its tools become visible in the tool schema and callable by the model.
+
+Activation is per-session and lasts for that session's lifetime (it survives further turns and `%Save()`/reload, but a brand-new session starts with nothing activated, even for the same agent). Registered-but-inactive tools still exist in the `ToolManager` -- `%Discover()` and other static introspection still report the full surface -- only the per-turn request sent to the model is filtered.
+
+To inspect activation state (useful for debugging or logging):
+
+```objectscript
+// Skills registered on this session, whether activated or not
+Set available = session.AvailableSkills
+Set iter = available.%GetIterator()
+While iter.%GetNext(.i, .skill) { Write skill.name, " -- ", skill.description, ! }
+
+// Skills the model has actually activated so far
+Set active = session.ActiveSkills
+Set iter = active.%GetIterator()
+While iter.%GetNext(.i, .skill) { Write skill.name, " activated at ", skill.activated_at, ! }
+```
+
+### Loading Skills on a Declarative Agent
+
+Declarative `%AI.Agent` subclasses can list skills in the `SKILLS` parameter. They are loaded automatically by `%Init()`:
+
+```objectscript
+Class MyApp.Agent.ProjectAssistant Extends %AI.Agent
+{
+    Parameter PROVIDER = "anthropic";
+    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter SKILLS   = "MyApp.Skill.SummarizeDocument,MyApp.Skill.CreatePR";
+
+    XData INSTRUCTIONS [ MimeType = "text/markdown" ]
+    {
+You are a project assistant. Use your skills to handle specialized tasks.
+    }
+}
+
+// Skills are loaded automatically by %Init()
+Set agent = ##class(MyApp.Agent.ProjectAssistant).%New()
+$$$ThrowOnError(agent.%Init())
+Set session = agent.CreateSession()
+Set response = agent.Chat(session, "Summarize /data/report.pdf and then create a PR")
+```
+
+**Sigil inheritance** -- subclasses can add to or remove from an inherited skill set using `+`/`-`/`!` prefixes on each entry:
+
+```objectscript
+Parameter SKILLS = "MyApp.Skill.ExtraSkill";          // add to inherited set
+Parameter SKILLS = "-MyApp.Skill.SummarizeDocument";  // remove one inherited skill
+Parameter SKILLS = "!MyApp.Skill.ExtraSkill";         // reset then add
+Parameter SKILLS = "!";                               // opt out of all inherited skills
+```
+
 ### Loading a Skill from an External URI
 
-Skills can also be loaded from external `SKILL.md` files — useful for sharing skills across projects or loading from a git repository:
+Skills can also be loaded from external `SKILL.md` files -- useful for sharing skills across projects or loading from a git repository:
 
 ```objectscript
 // From a git repository
@@ -830,9 +900,8 @@ Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("https://github.com/myorg/s
 // From a local path
 Set skill = ##class(%AI.Agent.Skill).GetSkillFromURI("file:///opt/skills/summarize")
 
-// Register with agent as above
-Set skill.ParentAgent = agent
-Do agent.ToolManager.AddTool(skill)
+// Add to the agent
+$$$ThrowOnError(agent.UseSkill(skill))
 ```
 
 A `SKILL.md` file uses YAML front matter followed by Markdown instructions:
@@ -841,17 +910,13 @@ A `SKILL.md` file uses YAML front matter followed by Markdown instructions:
 ---
 name: summarize-document
 description: Summarize a document from the filesystem.
-parameters:
-  - name: userRequest
-    description: Path and summarization instructions
-    type: string
-    required: true
 tags:
   - summarization
 ---
 
-You are a document summarization specialist.
-Read the file at the given path and produce a concise summary under 200 words.
+## Document Summarization
+
+When asked to summarize a document, read the file and produce a concise summary under 200 words.
 ```
 
 ### Exporting a Skill
@@ -876,14 +941,139 @@ Do skill.ExportSkill(stream)
 | | `%AI.Agent.SubAgent` | `%AI.Agent.Skill` |
 |---|---|---|
 | **Definition** | Subclass + `GetSystemPrompt()` override | Subclass + `SUMMARY`/`INSTRUCTIONS` XData |
-| **Tool description** | Derived from system prompt | From `SUMMARY.description` |
-| **Tool loading** | Manual `AddTool()` | `TOOLS` parameter + `AddTool()` |
-| **External source** | No | Yes — `GetSkillFromURI()` |
-| **Export** | No | Yes — `ExportSkill()` |
+| **How it works** | Spawns a child agent to handle the request | Registers instructions + tools with the parent agent, revealed to the model once it activates the skill via `load_skill` |
+| **Tool access** | Sub-agent has its own tool catalog | Tools go directly into the parent's catalog (hidden until activation) |
+| **External source** | No | Yes -- `GetSkillFromURI()` |
+| **Export** | No | Yes -- `ExportSkill()` |
 
-Use `%AI.Agent.SubAgent` for simple programmatic sub-agents. Use `%AI.Agent.Skill` when you want structured, reusable, shareable skill definitions with rich metadata.
+Use `%AI.Agent.SubAgent` when you want a completely isolated agent with its own conversation context and tool set. Use `%AI.Agent.Skill` when you want to augment a parent agent's capabilities with a reusable, shareable set of instructions and tools.
 
+## Planning Skill (%AI.Skills.Planning)
 
+`%AI.Skills.Planning` is a built-in stateful skill that gives an agent structured long-task planning capabilities: a scratchpad for working notes and a hierarchical task list with a full lifecycle. Add it to any agent with `UseSkill` and the agent will automatically use the planning protocol for complex, multi-step work.
+
+### Adding the Skill
+
+```objectscript
+Set provider = ##class(%AI.Provider).Create("openai", {"api_key": apiKey})
+Set agent = ##class(%AI.Agent).%New(provider)
+$$$ThrowOnError(agent.UseSkill("%AI.Skills.Planning"))
+$$$ThrowOnError(agent.%Init())
+
+Set session = agent.CreateSession()
+Set response = agent.Run(session, "Research, outline, and draft a short report on IRIS vector search.")
+Write response.Content
+```
+
+Or declaratively:
+
+```objectscript
+Class MyApp.Agent.Planner Extends %AI.Agent
+{
+    Parameter PROVIDER = "anthropic";
+    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter SKILLS   = "%AI.Skills.Planning";
+}
+```
+
+### How it Works
+
+The skill injects a planning protocol into the agent's system prompt. For any non-trivial request the agent is instructed to:
+
+1. **Clarify** -- if the goal is ambiguous, ask clarifying questions before creating tasks.
+2. **Plan** -- call `ResetPlan` with the goal, `WriteScratchpad` with approach notes, then create tasks with `AppendTask` or `InsertTask`.
+3. **Execute** -- work through tasks sequentially: `StartTask`, do the work, `CompleteTask` (or `FailTask`/`BlockTask`). Only one task is `in_progress` at a time.
+4. **Verify** -- before responding, confirm no tasks remain `pending`, `in_progress`, `blocked`, or `failed`.
+
+The scratchpad is private working memory -- the agent keeps evolving notes there without cluttering the conversation.
+
+### Task IDs
+
+Tasks use decimal IDs that define both hierarchy and execution order:
+
+```
+1         -- first top-level task
+1.1       -- first subtask of task 1 (runs before 1.2 and 2)
+1.2       -- second subtask of task 1
+2         -- second top-level task
+2.3.1     -- deep subtask
+```
+
+`AppendTask` assigns the next available ID automatically. `InsertTask` places a task at an explicit position. Every task -- including parents -- must be independently actionable; parent tasks are not headings.
+
+### Tool Reference
+
+| Tool | Description |
+|------|-------------|
+| `ResetPlan(goal, keepScratchpad?)` | Clear all tasks and set a new goal. Call at the start of each new problem. |
+| `WriteScratchpad(content)` | Replace working notes. Keep concise: goal, constraints, approach, next action. |
+| `ReadScratchpad()` | Return current scratchpad content. |
+| `AppendTask(content, parentId?)` | Add a pending task at the end of the current level (or under `parentId`). |
+| `InsertTask(id, content)` | Insert a task at a specific decimal position (parent must exist first). |
+| `UpdateTaskDescription(id, content)` | Revise task wording without changing its status or history. |
+| `StartTask(id)` | Mark a task `in_progress`. Enforces single-active discipline -- rejects if another task is already active. Clears any `blocker` field. |
+| `CompleteTask(id, result?, verification?)` | Mark `in_progress` task done. Record what was produced and how it was verified. |
+| `FailTask(id, reason?)` | Mark `in_progress` task failed. Increments a failure counter; after three failures the response prompts escalation rather than blind retry. |
+| `BlockTask(id, blocker)` | Mark a task blocked by an external dependency. Call `StartTask` to resume once resolved. |
+| `CancelTask(id, reason?)` | Mark a task cancelled. Use `InsertTask` or `AppendTask` to create a replacement if needed. |
+| `GetTask(id)` | Fetch a single task by ID. |
+| `ListTasks(status?, parentId?, includeDescendants?, offset?, limit?)` | Paginated, filterable task list. `includeDescendants` (default true) controls whether all descendants or only direct children of `parentId` are returned. Prefer `GetPlanStatus` for routine status checks. |
+| `GetPlanStatus(includeScratchpad?)` | Compact dashboard: task counts by status, current `in_progress` task, next `pending` task. Use before choosing the next action in a large plan. |
+
+### Iteration Budget
+
+The planning protocol makes multiple tool calls per task (at minimum: `StartTask` + `CompleteTask`), so agents using this skill need more agentic-loop iterations than a simple chat agent.
+
+`%AI.Agent.MaxIterations` controls how many times `Run()` calls `Chat()` (the outer loop). It defaults to 10 — keep it at a positive number suited to the number of tasks you expect.
+
+`max_iterations` in `CreateSession` controls the inner tool-call loop within each `Chat()`. Pass `0` or omit it entirely to remove that inner cap and rely on the agent's loop-detection mechanism instead:
+
+```objectscript
+// Outer loop: allow Run() to call Chat() up to 30 times (one per planning step or task)
+Set agent.MaxIterations = 30
+
+// Inner loop: no hard cap per Chat() call -- loop detection stops runaway tool calls
+Set session = agent.CreateSession({"max_iterations": 0})
+```
+
+### Inspecting Plan State After a Run
+
+Because the planning skill is `STATEFUL`, the same instance is reused for every tool call. Create it yourself and pass it directly to the ToolManager to retain a live reference for post-run inspection:
+
+```objectscript
+Set agent = ##class(%AI.Agent).%New(provider)
+
+// Adding the instance directly via ToolManager.AddTool (rather than UseSkill)
+// bypasses progressive disclosure entirely, so fold INSTRUCTIONS directly into
+// the base system prompt instead -- there's no available/active skill entry
+// to activate later.
+Set xdata = ##class(%Dictionary.XDataDefinition).%OpenId("%AI.Skills.Planning||INSTRUCTIONS")
+If $ISOBJECT(xdata) {
+    Set instr = ""
+    Do xdata.Data.Rewind()
+    While 'xdata.Data.AtEnd { Set instr = instr _ xdata.Data.ReadLine() _ $C(10) }
+    Set sep = $SELECT(agent.SystemPrompt '= "": $C(10,10), 1: "")
+    Set agent.SystemPrompt = agent.SystemPrompt _ sep _ $ZSTRIP(instr, "<>W")
+}
+Set planning = ##class(%AI.Skills.Planning).%New()
+$$$ThrowOnError(agent.ToolManager.AddTool(planning))
+$$$ThrowOnError(agent.%Init())
+
+Set session = agent.CreateSession()
+Do agent.Run(session, "...")
+
+// Inspect the plan the agent built
+Set status = planning.GetPlanStatus()
+Write "Goal: ", status.goal, !
+Write "Total tasks: ", status.counts.total, !
+Write "Done: ", status.counts.done, !
+
+Set tasks = planning.ListTasks().tasks
+Set iter = tasks.%GetIterator()
+While iter.%GetNext(.i, .task) {
+    Write task.id, " [", task.status, "] ", task.content, !
+}
+```
 
 ## RAG (Retrieval-Augmented Generation)
 
