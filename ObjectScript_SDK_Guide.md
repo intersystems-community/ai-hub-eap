@@ -2562,7 +2562,32 @@ Expansion is performed by the Rust SettingExpander, so the same `@{...}` syntax 
 
 `iris-mcp-server` is a standalone Rust process that bridges LLM clients (Claude Desktop, Python MCP clients, etc.) to IRIS tools over the wgproto protocol. It uses two independent authentication layers: one for the `wgproto` transport connection and one for per-request CSP application identity.
 
-See [`MCP_Server_Guide.md`](MCP_Server_Guide.md) for full configuration and authentication details.
+See `MCP_SERVER_GUIDE.md` for full configuration and authentication details -- that guide covers `iris-mcp-server` itself (the Rust gateway process). The rest of this section covers `%AI.MCP.Service`, the ObjectScript dispatch class every MCP Server CSP application points at.
+
+#### Custom Authentication (`OnAuthenticate`)
+
+Override `OnAuthenticate(authType As %String, auth As %String) As %Status` in your `%AI.MCP.Service` subclass to authenticate, authorize, or otherwise inspect a request before it reaches tool dispatch. The base class calls it from both the REST path (stateless tool calls, discovery) and the WebSocket path (stateful tool calls) -- one override covers both, so you never need to know which transport a given call used.
+
+`authType`/`auth` are the caller's raw `Authorization` header, already split on the standard `scheme credentials` boundary (RFC 7235 §2.1) -- `"Bearer xyz"` becomes `authType="Bearer"`, `auth="xyz"`; `"Basic dXNlcjpwYXNz"` becomes `authType="Basic"`, `auth="dXNlcjpwYXNz"`. Both are `""` when no `Authorization` header was sent. This is deliberately scheme-agnostic: a Bearer token from an OAuth flow, a Basic-auth pair, a bare API key, or a Negotiate/SPNEGO token are all just an `authType`/`auth` pair to this hook -- compare `authType` case-insensitively, since HTTP auth-scheme tokens are case-insensitive by spec.
+
+```objectscript
+ClassMethod OnAuthenticate(authType As %String, auth As %String) As %Status
+{
+    If $ZCONVERT(authType, "L") '= "bearer" Return $$$ERROR($$$AccessDenied)
+    If '..ValidateApiKey(auth, .username) Return $$$ERROR($$$AccessDenied)
+    Set ^||MyAppAuthUser = username  // read back by a tool later in this request/session
+    Return $$$OK
+}
+```
+
+Return `$$$OK` to let the request through; return any error status (`$$$ERROR($$$AccessDenied)` is the common case) to reject it with a `401` -- the base class sets that response for you. The default implementation always returns `$$$OK`, so existing subclasses that don't override it are unaffected.
+
+**This hook runs *after* whatever authentication mode the MCP Server CSP application is configured with (Password, OAuth 2.0, or Unauthenticated) has already been satisfied** -- it does not replace that setting, it runs in addition to it, and only once the request has already been let through. A caller that fails Password or OAuth validation is rejected by the CSP dispatcher itself, before this hook is ever reached. That gives two different usable patterns, not one:
+
+- **Replacing IRIS's own auth with a fully custom scheme:** set the MCP Server's authentication to **Unauthenticated** in the Management Portal, so there's nothing for IRIS to reject beforehand, and validate the credential entirely in `OnAuthenticate()`. This is the *only* way to get a custom-scheme-only deployment -- leaving Password or OAuth 2.0 enabled means a caller must satisfy that first, on top of whatever `OnAuthenticate()` additionally checks.
+- **Supplementing IRIS's own auth:** keep Password or OAuth 2.0 enabled (so `$USERNAME`/`$ROLES` are already established by the time this runs) and use the hook for something unrelated to identity -- billing/usage attribution, endpoint/IP validation, request security scanning -- without ever rejecting a request.
+
+See [Remote MCP — OAuth Passthrough](../MCP_SERVER_GUIDE.md#remote-mcp--oauth-passthrough) in `MCP_SERVER_GUIDE.md` for how the `Authorization` header reaches this point when a request arrives via `iris-mcp-server`.
 
 ## Building Agentic Applications
 
