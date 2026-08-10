@@ -7,8 +7,8 @@ Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
 Parameter PROVIDER = "vertex";
 
 /// Provider configuration
-/// service_account_path can use @{env.VERTEX_SA_PATH} or @{config.MyApp/VertexConfig} to avoid hardcoding
-Parameter PROVIDERCONFIG = "{ ""project_id"": ""my-gcp-project"", ""region"": ""us-east5"", ""service_account_path"": ""@{env.VERTEX_SA_PATH}"" }";
+/// service_account_path can use @{env:VERTEX_SA_PATH} or @{config:MyApp.VertexConfig} to avoid hardcoding
+Parameter PROVIDERCONFIG = "{ ""project_id"": ""my-gcp-project"", ""region"": ""us-east5"", ""service_account_path"": ""@{env:VERTEX_SA_PATH}"" }";
 
 /// Model to use (Claude 4.5)
 Parameter MODEL = "claude-sonnet-4-6";
@@ -126,17 +126,9 @@ ClassMethod DemoMultiModal() As %Status
     Set session = agent.CreateSession()
 
     // Build multi-modal content (text + image)
-    Set content = []
-    Do content.%Push({
-        "type": "text",
-        "text": "What do you see in this image?"
-    })
-    Do content.%Push({
-        "type": "image_url",
-        "image_url": {
-            "url": "https://example.com/image.jpg"
-        }
-    })
+    Set content = ##class(%AI.LLM.ContentPart).Build(
+        ##class(%AI.LLM.ContentPart).Text("What do you see in this image?"),
+        ##class(%AI.LLM.ContentPart).ImageURL("https://example.com/image.jpg"))
 
     // Send multi-modal content
     Set response = agent.ChatWithContent(session, content)
