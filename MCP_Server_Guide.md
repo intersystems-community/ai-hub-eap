@@ -604,14 +604,21 @@ denied_networks  = ["10.0.5.0/24"]                    # always wins over allowed
 
 When `iris-mcp-server` runs in HTTP/HTTPS mode, each MCP session from a remote client carries its own `Authorization` header (commonly an OAuth 2.0 Bearer token). `iris-mcp-server` forwards the header value unchanged to IRIS on every request within that session. Any valid scheme (Bearer, API-key-as-Authorization, etc.) works without server-side changes.
 
-OAuth passthrough is always active for the HTTP/HTTPS transport. Endpoint `username`/`password`/`bearer` configuration acts as a fallback only when no `Authorization` header arrives from the client.
+OAuth passthrough is always active for the HTTP/HTTPS transport. Endpoint `username`/`password`/`bearer` configuration acts as a fallback only when no `Authorization` header arrives from the client. This means every caller that omits a bearer token — not just one — is attributed to that single configured identity: if you need to distinguish individual callers in IRIS's own audit trail, require a bearer token from all of them (see `allow_anonymous` below) rather than relying on endpoint credentials as a catch-all.
+
 
 **A remote (non-loopback) listener requires a bearer token by default.** If a request carries no `Authorization` header at all, `iris-mcp-server` rejects it at the transport level with `401 Unauthorized` and a `WWW-Authenticate: Bearer` header — before the request ever reaches IRIS — rather than silently falling back to the operator's configured endpoint credential. When an `[oauth]` proxy is configured for that listener, the challenge additionally includes a `resource_metadata` parameter pointing at `/.well-known/oauth-protected-resource`, so a compliant MCP client can bootstrap AS discovery directly from the 401. Set `[mcp] allow_anonymous = true` only if you specifically want an anonymous remote caller to run tools as that configured identity — this should be a deliberate choice, not a default.
 
 
 For IRIS to validate incoming Bearer tokens automatically, OAuth authentication must be enabled on the MCP Server endpoint in the IRIS Management Portal. When enabled, IRIS validates the token at WebSocket session open time — by the time a tool call runs, the end-user identity is already established.
 
-For per-tool authorization based on claims (scope, audience, groups), use a `%AI.Policy.Authorization` subclass attached to your ToolSet — this is the recommended approach for fine-grained access control. `OnPreServer()` in your `%AI.MCP.Service` subclass can be used for session-level connection gating (rejecting the entire session before the dispatch loop starts), but is a blunt instrument compared to the per-tool policy system.
+For per-tool authorization based on claims (scope, audience, groups), use a `%AI.Policy.Authorization` subclass attached to your ToolSet — this is the recommended approach for fine-grained access control.
+
+For request- or session-level gating that applies uniformly before any tool dispatch — validating a custom credential, IP/endpoint checks, usage/billing attribution — override `OnAuthenticate(authType As %String, auth As %String) As %Status` in your `%AI.MCP.Service` subclass instead. It's a blunter instrument than the per-tool policy system (no per-tool granularity), but one override covers both transports: REST tool calls and WebSocket sessions alike. `authType`/`auth` are the caller's raw `Authorization` header already split into scheme and credential (both `""` if none was sent). It runs *after* IRIS's own CSP application authentication (Password/OAuth 2.0/Unauthenticated) has already accepted the request, so it supplements that setting rather than replacing it — unless the application is set to `Unauthenticated`, in which case it's the only check performed. Return `$$$OK` to proceed, or an error `%Status` (e.g. `$$$ERROR($$$AccessDenied)`) to reject with `401` — the framework sets the HTTP response status for you; the default implementation is a no-op.
+
+Note: `OnPreServer()` and `OnPreDispatch()` are `Final` and route through `OnAuthenticate()` internally — do not attempt to override them directly, it will not compile. `OnAuthenticate()` is the only supported hook for this purpose.
+
+`<Discovery Class="..." />` is a third `<Policies>` slot alongside `<Authorization>` and `<Audit>` (see the ToolSet example above) for controlling what `tools/list` returns. A `%AI.Policy.Discovery` subclass overrides `%Resolve(catalog As %DynamicArray)` to add or remove entries from the tool catalog before it's sent to the LLM, and `%Execute(toolName, args)` to handle any tool it introduced that way. **This is currently experimental and may change or be removed without a deprecation period.**
 
 Requests carrying a Bearer token whose `exp` claim is already in the past are rejected by `iris-mcp-server` before reaching IRIS.
 
@@ -896,6 +903,7 @@ Class MyApp.ToolSet.Database Extends %AI.ToolSet
             <Policies>
                 <Authorization Class="MyApp.Policy.ReadOnlyAuth" />
                 <Audit Class="%AI.Policy.ConsoleAudit" />
+                <Discovery Class="MyApp.Policy.StoredProcDiscovery" />
             </Policies>
             <Include Class="%AI.Tools.SQL">
                 <Requirement Name="ReadOnly" Value="1"/>
@@ -934,14 +942,16 @@ You can then add an MCP server to InterSystem IRIS that uses your service class:
 
 ### How Discovery Works
 
-Tool discovery is deferred until the first MCP client connects. At that point `iris-mcp-server` fetches the tool list from each configured endpoint:
+Discovery is on demand and scoped per caller identity, not a single global fetch done once at startup. `iris-mcp-server` doesn't know in advance which tools a given caller's IRIS-side authorization (CanList policies, role-based filtering) will actually return, so it defers fetching until it sees a request from that identity, then repeats the fetch independently for every distinct identity that connects:
 
-1. Sends `GET {endpoint}/v1/services` to IRIS (conditional GET with `If-None-Match` ETag)
-2. InterSystems IRIS MCP Service returns a JSON tool catalog
+1. Sends `GET {endpoint}/v1/services` to IRIS (conditional GET with `If-None-Match` ETag), authenticated as that caller
+2. InterSystems IRIS MCP Service returns a JSON tool catalog scoped to what that identity is authorized to see
 3. `iris-mcp-server` registers the tools, computing a per-tool SHA-256 hash
-4. A service-level ETag is stored for future conditional GETs
+4. A service-level ETag is stored for future conditional GETs for that identity
 
 If discovery fails (for example, because IRIS is temporarily unreachable), the existing registration is retained so already-registered tools remain available. A fresh discovery attempt is made on the next tool call.
+
+**Deployment-validation implication:** because discovery is per-identity, a successful test connection during rollout only proves discovery works for *that* identity. A misconfiguration that only affects a different identity — a missing role grant, a `CanList` policy that behaves unexpectedly for a particular caller — won't surface as a failure until a client actually connects as that identity, potentially well after deployment. Don't treat one successful smoke-test login as validation for every identity that will use the server.
 
 ### Tool Refresh
 
