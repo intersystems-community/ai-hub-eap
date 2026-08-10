@@ -52,6 +52,10 @@ The xAI (Grok) provider is now identified as `"xai"`. The alias `"grok"` still w
 
 A new built-in experimental skill giving any agent structured long-task planning (scratchpad + hierarchical task list). See the [Advanced Features Guide](ObjectScript_SDK_Advanced.md#planning-skill-aiskillsplanning).
 
+### Custom authentication for MCP services (`OnAuthenticate`)
+
+`%AI.MCP.Service` subclasses can now override `OnAuthenticate()` to validate a custom credential -- an API key from your own key-management UI, Basic auth, or any other scheme carried in the `Authorization` header -- without needing to know whether a given tool call arrives over REST or WebSocket; the base class calls it from both. See [Custom Authentication (OnAuthenticate)](#custom-authentication-onauthenticate) for details.
+
 ---
 
 
