@@ -30,6 +30,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Layer 1 - Authenticating `iris-mcp-server` to InterSystems IRIS](#layer-1---authenticating-iris-mcp-server-to-intersystems-iris)
     - [Layer 2 - MCP Endpoint Credentials](#layer-2---mcp-endpoint-credentials)
     - [Host Header Validation](#host-header-validation-multi-container-and-reverse-proxy-deployments)
+    - [Network Access Control (CIDR Allow/Deny Lists)](#network-access-control-cidr-allowdeny-lists)
     - [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough)
     - [OAuth 2.1 Authorization Server Proxy](#oauth-21-authorization-server-proxy)
       - [Configuration](#configuration)
@@ -61,6 +62,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Container](#container)
     - [Kubernetes](#kubernetes)
     - [Connection Pool Sizing](#connection-pool-sizing)
+    - [Listener Resource Limits](#listener-resource-limits)
   - [Troubleshooting](#troubleshooting)
     - [Connection Failures](#connection-failures)
     - [Connected but No Tools Appear](#connected-but-no-tools-appear)
@@ -235,8 +237,9 @@ CLI flags  >  TOML config file  >  built-in defaults
 [mcp]
 transport  = "stdio"        # stdio | http | https
 host       = "127.0.0.1"     # bind address for HTTP/HTTPS transports (default: 127.0.0.1)
-port       = 8080           # bind port
-base_route = "/mcp"         # HTTP route prefix (default: /mcp)
+                             # IPv6 literals are also accepted, e.g. "::1" or "::".
+port       = 8080            # bind port
+base_route = "/mcp"          # HTTP route prefix (default: /mcp)
 
 # Allowed Host header values for inbound HTTP/HTTPS requests (optional).
 # Localhost variants are always permitted. Default behaviour:
@@ -244,6 +247,33 @@ base_route = "/mcp"         # HTTP route prefix (default: /mcp)
 #   public bind  (0.0.0.0):    all Host values accepted (a warning is logged).
 # Set to enforce a strict allowlist on a public server:
 # allowed_hosts = ["mcp.example.com", "mcp.example.com:8080"]
+# An IPv6 entry must be bracketed, e.g. "[2001:db8::1]:8443".
+
+# Peer IP allow/deny lists, in CIDR notation (optional, IPv4 and IPv6 may be
+# mixed freely). Enforced at TCP-accept time, before any HTTP/TLS handshake.
+# Empty allowed_networks (the default) means all peers are allowed, subject
+# to denied_networks; denied_networks always takes precedence.
+# allowed_networks = ["10.0.0.0/8", "2001:db8::/32"]
+# denied_networks  = ["10.0.5.0/24"]
+
+# Require a bearer token from remote (non-loopback) callers before falling
+# back to a configured endpoint credential (default: false, i.e. required).
+# Only set to true if you specifically want an anonymous remote caller to
+# execute tools as the operator-configured [iris.user_auth] identity -- see
+# "Remote MCP — OAuth Passthrough" below.
+# allow_anonymous = false
+
+# Maximum concurrently accepted TCP connections on this listener (HTTP/HTTPS
+# only; default: 1024). Bounds file-descriptor/memory exhaustion from a
+# connection flood (including Slowloris-style attacks).
+# max_connections = 1024
+
+# Maximum number of tools/call and initialize-triggered discovery requests
+# this listener processes concurrently across all sessions (default: 128).
+# Additional requests are rejected immediately rather than queuing, so a
+# burst of concurrent requests can't drive unbounded load onto IRIS.
+# max_concurrent_requests = 128
+
 
 # TLS for the MCP HTTP transport (required when transport = "https")
 # [mcp.tls]
@@ -292,6 +322,12 @@ max_response_bytes = 10485760
 
 # Maximum time to wait for a WebSocket session to open (default: "30s").
 connect_timeout = "30s"
+
+# Maximum time to wait for a tool call to complete once the connection is
+# established -- covers both the REST tool-call round trip and the WebSocket
+# response wait (default: "60s"). A hung/silent backend fails and releases
+# the pooled connection instead of holding it indefinitely.
+request_timeout = "60s"
 
 # How long a pooled WebSocket session may sit idle before it is closed (default: "5m").
 # Closing an idle session causes the InterSystems IRIS job to Halt, freeing its license slot.
@@ -351,6 +387,8 @@ output = "stderr"           # stderr | file
 smart_discovery = false     # enable RAG tool search (requires smart-discovery feature)
 telemetry       = false     # enable OpenTelemetry tracing
 vault           = false     # enable Vault secret provider
+monitor_ipc     = true      # run the IPC metrics server `iris-mcp-server monitor` connects to
+                             # (default: true); override per-invocation with --monitor-ipc/--no-monitor-ipc
 ```
 
 ### Secret and Credentials
@@ -388,10 +426,11 @@ All flags before the subcommand are global:
 |------|-------------|
 | `--iris-host=<host>` | IRIS hostname or IP |
 | `--iris-port=<port>` | IRIS super-server port |
-| `--iris-user=<user>` | IRIS connection username |
-| `--iris-password=<pass>` | IRIS connection password |
 | `--iris-endpoint=<path>` | MCP Server path — may be repeated for multiple endpoints |
 | `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
+| `--monitor-ipc` / `--no-monitor-ipc` | Enable/disable the local IPC metrics server `monitor` connects to (default: enabled); overrides `[features] monitor_ipc` |
+
+> Gateway credentials are supplied only through `[[iris]] server.username`/`server.password` in the config file (or `@{env:...}`/`@{vault:...}` references) — never as a CLI flag, so they never appear in `ps`/Task Manager output.
 
 
 `monitor` subcommand flags (one of `--pid` or `--socket` is required):
@@ -544,12 +583,31 @@ host          = "0.0.0.0"
 port          = 8080
 allowed_hosts = ["mcp.example.com", "mcp.example.com:8080"]
 ```
+An IPv6 entry must be bracketed, e.g. `"[2001:db8::1]:8443"`.
+
+### Network Access Control (CIDR Allow/Deny Lists)
+
+For an additional layer of defence below the application (Host header / auth) checks, `iris-mcp-server` can restrict which peer IP addresses are allowed to open a connection at all, in CIDR notation:
+
+```toml
+[mcp]
+transport        = "http"
+host             = "0.0.0.0"
+port             = 8080
+allowed_networks = ["10.0.0.0/8", "2001:db8::/32"]   # IPv4 and IPv6 may be mixed
+denied_networks  = ["10.0.5.0/24"]                    # always wins over allowed_networks
+```
+
+`allowed_networks` empty (the default) means every peer is allowed, subject to `denied_networks`. A peer matching both lists is denied. This is enforced at TCP-accept time, before any HTTP or TLS handshake work — a denied peer's connection is rejected immediately, without spending any effort parsing its request.
 
 ### Remote MCP — OAuth Passthrough
 
 When `iris-mcp-server` runs in HTTP/HTTPS mode, each MCP session from a remote client carries its own `Authorization` header (commonly an OAuth 2.0 Bearer token). `iris-mcp-server` forwards the header value unchanged to IRIS on every request within that session. Any valid scheme (Bearer, API-key-as-Authorization, etc.) works without server-side changes.
 
 OAuth passthrough is always active for the HTTP/HTTPS transport. Endpoint `username`/`password`/`bearer` configuration acts as a fallback only when no `Authorization` header arrives from the client.
+
+**A remote (non-loopback) listener requires a bearer token by default.** If a request carries no `Authorization` header at all, `iris-mcp-server` rejects it at the transport level with `401 Unauthorized` and a `WWW-Authenticate: Bearer` header — before the request ever reaches IRIS — rather than silently falling back to the operator's configured endpoint credential. When an `[oauth]` proxy is configured for that listener, the challenge additionally includes a `resource_metadata` parameter pointing at `/.well-known/oauth-protected-resource`, so a compliant MCP client can bootstrap AS discovery directly from the 401. Set `[mcp] allow_anonymous = true` only if you specifically want an anonymous remote caller to run tools as that configured identity — this should be a deliberate choice, not a default.
+
 
 For IRIS to validate incoming Bearer tokens automatically, OAuth authentication must be enabled on the MCP Server endpoint in the IRIS Management Portal. When enabled, IRIS validates the token at WebSocket session open time — by the time a tool call runs, the end-user identity is already established.
 
@@ -1202,6 +1260,7 @@ As a general rule, `max` should be at least as large as the number of tool calls
 | Setting | Default | Effect |
 |---------|---------|--------|
 | `connect_timeout_secs` | `"30s"` | Maximum time to wait for a WebSocket session to open |
+| `request_timeout` | `"60s"` | Maximum time to wait for a tool call to complete once connected; a hung/silent backend fails and releases the pooled connection instead of holding it indefinitely |
 | `idle_timeout` | `"5m"` | Close sessions idle longer than this (InterSystems IRIS job halts and its license is freed) |
 | `max_sessions_per_auth_context` | `pool.max` | Cap on concurrent sessions per OAuth user / token identity |
 | `max_age` | off | Hard cap on total session lifetime; session dropped on next idle regardless of activity |
@@ -1238,6 +1297,25 @@ server = { host = "iris2.example.com", port = 1972, username = "CSPSystem", pass
 pool   = { min = 2, max = 10 }
 endpoints = [{ path = "/mcp/analytics" }]
 ```
+### Listener Resource Limits
+
+Unlike `pool = { min, max }` above (which bounds sessions to a specific IRIS backend), `max_connections` and `max_concurrent_requests` are per-`[mcp]`-listener limits that bound load from clients, independent of how many IRIS backends that listener talks to:
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `max_connections` | `1024` | Maximum concurrently accepted TCP connections (HTTP/HTTPS only). Once reached, the accept loop stops taking new connections until an existing one closes — bounds file-descriptor/memory exhaustion from a connection flood, including a Slowloris-style attack. |
+| `max_concurrent_requests` | `128` | Maximum `tools/call` and `initialize`-triggered discovery requests processed concurrently across all sessions on this listener. Additional requests are rejected immediately (tool calls) or skip discovery for that session (initialize) rather than queuing or executing unbounded. |
+
+```toml
+[mcp]
+transport               = "http"
+host                    = "0.0.0.0"
+port                    = 8080
+max_connections         = 2048
+max_concurrent_requests = 256
+```
+
+The defaults are generous starting points for most deployments; lower them on resource-constrained hosts, or raise them if legitimate traffic is being rejected (check the logs for the corresponding warning).
 
 ---
 
@@ -1283,7 +1361,10 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 
 This error means that InterSystems IRIS is reachable ([Layer 1](#layer-1---authenticating-iris-mcp-server-to-intersystems-iris)) but the MCP endpoint is rejecting the request ([Layer 2](#layer-2---mcp-endpoint-credentials)).
 
-When authentication is required but credentials are missing or invalid, `%AI.MCP.Service` returns a JSON `401 Unauthorized` response. If the `[oauth]` proxy is enabled, `iris-mcp-server` additionally includes a `WWW-Authenticate` header pointing at `/.well-known/oauth-protected-resource`, allowing MCP clients to bootstrap AS discovery from the 401 challenge.
+Two different layers can produce a 401, and it matters which one you're seeing:
+
+- **No `Authorization` header reached `iris-mcp-server` at all**, on a remote listener that requires one: `iris-mcp-server` itself rejects the request before it reaches IRIS, with a `WWW-Authenticate: Bearer` header — this fires regardless of whether `[oauth]` is configured (see [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough)); the header additionally carries a `resource_metadata` parameter when it is.
+- **A request did reach IRIS but its endpoint credentials were missing or invalid**: `%AI.MCP.Service` itself returns a JSON `401 Unauthorized` response.
 
 1. Verify the endpoint entry in `[[iris]] endpoints` has the correct `username`/`password` or `bearer` for that endpoint.
 2. For HTTP Basic: confirm the username/password are valid IRIS credentials with access to the endpoint.
