@@ -330,7 +330,7 @@ ClassMethod Create(name As %String, settings As %DynamicObject) As %AI.Provider
 | Anthropic | `"anthropic"` | `api_key` |
 | Google Gemini | `"gemini"` | `api_key` |
 | Google Vertex AI | `"vertex"` | `project_id`, `region`, `service_account_path`, `service_account_json` |
-| AWS Bedrock | `"bedrock"` | `region` (SigV4) or `bearer_token` + `region` |
+| AWS Bedrock | `"bedrock"` | `region` (SigV4) or `api_key` + `region` (bearer token; `bearer_token` also accepted as an alias) |
 | Meta Llama | `"meta"` | `api_key` |
 | xAI | `"xai"` (alias: `"grok"`) | `api_key` |
 | NVIDIA NIM | `"nim"` | `base_url`, `api_key` (optional) |
@@ -362,12 +362,14 @@ Set provider = ##class(%AI.Provider).Create("bedrock", {
 })
 
 // AWS Bedrock — Bearer token (long-lived API key from the Bedrock console)
-// Supply the token explicitly in config:
+// Supply the token explicitly in config, same "api_key" key as every other
+// provider ("bearer_token" is also accepted, kept for backward compatibility):
 Set provider = ##class(%AI.Provider).Create("bedrock", {
     "region": "us-east-1",
-    "bearer_token": "..."
+    "api_key": "..."
 })
-// Or set the environment variable AWS_BEARER_TOKEN_BEDROCK and omit bearer_token:
+// Or set the environment variable AWS_BEARER_TOKEN_BEDROCK and omit api_key --
+// an explicit "api_key" in config always takes priority over the env var:
 Set provider = ##class(%AI.Provider).Create("bedrock", {
     "region": "us-east-1"
 })
@@ -672,6 +674,8 @@ The following table lists the relevant configuration parameters for `%AI.Agent` 
 | `APIKEY` | API key — supports `@{prefix.key}` placeholders | `"@{env.OPENAI_API_KEY}"`, `"@{wallet.MySecrets.Key}"` |
 | `PROVIDERCONFIG` | Full provider config as JSON — supports `@{prefix.key}` placeholders and may include `model_provider` to replace `PROVIDER` | `"@{config.MyLLM}"`, `"{""project_id"":""my-proj"",""region"":""@{env.REGION}""}"` |
 | `TOOLSETS` | Comma-separated ToolSet classes | `"%AI.Tools.FileSystem,%AI.Tools.SQL"` |
+
+`APIKEY` and `PROVIDERCONFIG` are composable, not mutually exclusive: use `PROVIDERCONFIG` for non-secret settings (e.g. `base_url`, `model_provider`) and `APIKEY` to separately supply the secret. If `PROVIDERCONFIG` already includes its own `"api_key"`, that value wins; `APIKEY` only fills the gap when `PROVIDERCONFIG` doesn't supply one.
 
 The following example creates a declarative agent configuration using the `PROVIDER`, `MODEL`, `APIKEY`, and `TOOLSETS` properties. It also contains system `INSTRUCTIONS` with an XData block, which prompts the agent with a description and a list of tools.
 
@@ -1670,6 +1674,9 @@ Filters and excludes compose naturally. Include narrows what comes in; Exclude r
 | `Class="ClassName"` | `<Exclude>` | Scope exclusion to one source class |
 
 > **Processing order:** Within a ToolSet, all `<Include>` elements are processed in declaration order (locally defined `<Tool>` elements win over includes with the same name). All `<Exclude>` elements are applied afterwards, across the full composed set.
+> **`Tool` and `Match` are mutually exclusive on a single element.** Specifying both `Tool=` and `Match=` on the same `<Include>`, `<Exclude>`, or `<Filter>` element is ambiguous and rejected at compile time — pick one, or use separate `<Filter>` children to OR multiple conditions together.
+
+> **Tool names must be unique and non-empty.** Two tools resolving to the same name within a ToolSet (whether from `<Tool>`, `<Include>`, `<Query>`, or `<MCP>`) is a compile-time error, as is a `<Tool>`/`<Query>` element with an empty `Name`.
 
 
 ### Tool Descriptions
@@ -2760,7 +2767,7 @@ Set cfg = {"region": "us-east-1"}
 Do ##class(%AI.System).Shell("bedrock", cfg, "anthropic.claude-3-5-sonnet-20241022-v2:0")
 
 // Bedrock — bearer token (note the cross-region inference profile prefix "us.")
-Set cfg = {"region": "us-east-1", "bearer_token": "..."}
+Set cfg = {"region": "us-east-1", "api_key": "..."}
 Do ##class(%AI.System).Shell("bedrock", cfg, "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
 // Or rely on the AWS_BEARER_TOKEN_BEDROCK env var instead of putting the token in code:
 // Set cfg = {"region": "us-east-1"}
