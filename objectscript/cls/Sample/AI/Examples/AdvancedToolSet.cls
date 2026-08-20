@@ -7,7 +7,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
     <ToolSet Name="AdvancedExample">
       <Description>Demonstrates local tools, included policies, MCP servers, and policy composition.</Description>
 
-      <!-- Policy Definitions -->
+      <!-- Policy Definitions. The "MCP servers" in this example are remote MCP servers consumed as tool sources, not this toolset being exposed over MCP. ConsoleAudit below writes to the current device, which is fine for terminal and agent use. If you expose this toolset through an %AI.MCP.Service, replace ConsoleAudit with a persistent %AI.Policy.Audit subclass orevery tools/call will fail with a JSON parse error. -->
       <Policies>
         <Authorization Class="Sample.AI.Policies.PathSanitizerPolicy">
           <AllowedPath>/tmp</AllowedPath>
