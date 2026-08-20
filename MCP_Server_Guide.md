@@ -892,6 +892,7 @@ Class MyApp.Tools.Calculator Extends %AI.Tool
 ### ToolSet with Policies
 
 This example composes tools with policies using XML DSL. Notice that it extends `%AI.ToolSet`:
+ **Do not use `%AI.Policy.ConsoleAudit` in a toolset exposed over MCP.** It writes to the current device, which during a web request is the HTTP response body. Tool discovery will succeed and every `tools/call` will then fail with `JSON serialization/deserialization error: expected value at line 2 column 1`. Use an audit policy that writes to a persistent class instead. Subclass %AI.Policy.Audit` and implement `%LogExecution()`, as shown in the audit policy examples in the ObjectScript SDK guide. `%AI.Policy.ConsoleAudit` is fine for terminal and agent code, where console output is the intent.
 
 ```objectscript
 Class MyApp.ToolSet.Database Extends %AI.ToolSet
@@ -902,7 +903,7 @@ Class MyApp.ToolSet.Database Extends %AI.ToolSet
             <Description>SQL and database operations</Description>
             <Policies>
                 <Authorization Class="MyApp.Policy.ReadOnlyAuth" />
-                <Audit Class="%AI.Policy.ConsoleAudit" />
+                <Audit Class="MyApp.Policy.DatabaseAudit" />
                 <Discovery Class="MyApp.Policy.StoredProcDiscovery" />
             </Policies>
             <Include Class="%AI.Tools.SQL">
