@@ -18,7 +18,7 @@ XData Definition [ MimeType = application/xml ]
     </Description>
 
     <Policies>
-      <!-- ConsoleAuth prompts for confirmation; ConsoleAudit logs every call. -->
+      <!-- ConsoleAuth prompts for confirmation; ConsoleAudit logs every call. Both write to the current device, so this toolset is for terminal and agent use only. Do not expose it over MCP: console output corrupts the JSON-RPC response body and every tools/call will fail. ConsoleAuth is worse there, since nothing can answer its prompt.-->
       <Authorization Class="%AI.Policy.ConsoleAuth"/>
       <Audit Class="%AI.Policy.ConsoleAudit"/>
     </Policies>
