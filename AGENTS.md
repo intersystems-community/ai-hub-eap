@@ -64,8 +64,10 @@ Key classes:
 - `%AI.Agent` — execution engine; subclass declaratively or instantiate programmatically
 - `%AI.ToolSet` — compose tools + policies via XData XML DSL
 - `%AI.Tool` — base class for individual tool implementations
-- `%AI.Policy.ConsoleAudit` — log all tool calls to the console (dev/debug)
+- `%AI.Policy.ConsoleAudit` — log all tool calls to the console (terminal/agent code only, not MCP)
 - `%AI.Policy.Authorization` — fine-grained per-tool authorization based on claims
+
+`%AI.Policy.ConsoleAudit` writes to the current device. In a toolset exposed over MCP the current device is the HTTP response body, so it corrupts the JSON-RPC reply and every `tools/call` fails with a JSON parse error. For MCP, subclass `%AI.Policy.Audit` and write to a persistent class instead.
 
 ### Expose IRIS Tools via MCP
 
