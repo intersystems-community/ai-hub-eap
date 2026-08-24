@@ -62,13 +62,22 @@ A new built-in experimental skill giving any agent structured long-task planning
 ## Table of Contents
 
 - [InterSystems AI Hub - ObjectScript SDK User Guide](#intersystems-ai-hub---objectscript-sdk-user-guide)
+  - [What's New in This Guide](#whats-new-in-this-guide)
+    - [Progressive-disclosure skills](#progressive-disclosure-skills)
+    - [New provider: Kimi (Moonshot AI)](#new-provider-kimi-moonshot-ai)
+    - [`SKILLS` parameter on declarative agents](#skills-parameter-on-declarative-agents)
+    - [Agent instruction templating](#agent-instruction-templating)
+    - [Session persistence and restore](#session-persistence-and-restore)
+    - [Provider naming: xAI](#provider-naming-xai)
+    - [Planning Skill (%AI.Skills.Planning)](#planning-skill-aiskillsplanning)
+    - [Custom authentication for MCP services (`OnAuthenticate`)](#custom-authentication-for-mcp-services-onauthenticate)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
     - [What is the InterSystems AI Hub?](#what-is-the-intersystems-ai-hub)
     - [Architecture](#architecture)
   - [Getting Started: API Key Setup](#getting-started-api-key-setup)
-    - [Current method: Environment Variables (Requires IRIS Restart)](#current-method-environment-variables-requires-iris-restart)
     - [Config Store Support](#config-store-support)
+    - [Alternative: Environment Variables (Requires IRIS Restart)](#alternative-environment-variables-requires-iris-restart)
   - [Core Components](#core-components)
     - [`%AI.Provider` - LLM Provider Interface](#aiprovider---llm-provider-interface)
     - [`%AI.Agent` - Execution Engine](#aiagent---execution-engine)
@@ -82,6 +91,7 @@ A new built-in experimental skill giving any agent structured long-task planning
     - [%AI.ToolMgr - Tool Registry \& Policy Manager](#aitoolmgr---tool-registry--policy-manager)
       - [Tool Policies](#tool-policies)
     - [%AI.LLM.Response - Response Object](#aillmresponse---response-object)
+    - [%AI.Catalog - Asset Discovery](#aicatalog---asset-discovery)
   - [Building Tools](#building-tools)
     - [Method 1: Simple ToolSet with Inline Tools](#method-1-simple-toolset-with-inline-tools)
     - [Method 2: Tools with Parameters](#method-2-tools-with-parameters)
@@ -112,7 +122,7 @@ A new built-in experimental skill giving any agent structured long-task planning
       - [`%Decode` — inbound argument decoding](#decode--inbound-argument-decoding)
       - [`%Encode` — outbound return value encoding](#encode--outbound-return-value-encoding)
       - [Scope](#scope)
-  - [Building Agent Skills](#building-agent-skills) 
+    - [Building Agent Skills](#building-agent-skills)
   - [Building ToolSets](#building-toolsets)
     - [ToolSet Structure](#toolset-structure)
     - [Including Other ToolSets](#including-other-toolsets)
@@ -133,6 +143,7 @@ A new built-in experimental skill giving any agent structured long-task planning
       - [`env` and `wallet`](#env-and-wallet)
       - [`config` — InterSystems IRIS ConfigStore](#config--intersystems-iris-configstore)
     - [Exposing IRIS Tools via `iris-mcp-server`](#exposing-iris-tools-via-iris-mcp-server)
+      - [Custom Authentication (`OnAuthenticate`)](#custom-authentication-onauthenticate)
   - [Building Agentic Applications](#building-agentic-applications)
     - [Basic Agentic Application Pattern](#basic-agentic-application-pattern)
     - [Multi-Turn Conversation Application](#multi-turn-conversation-application)
@@ -209,13 +220,40 @@ The InterSystems AI Hub bridges the gap between ObjectScript applications and mo
 ## Getting Started: API Key Setup
 
 Before using any LLMs, you need to configure API keys for your LLM provider. 
-The AI Hub uses the IRIS Wallet to store credentials, through a new facility called the IRIS Config Store.
+The AI Hub uses the IRIS Wallet to store credentials, through a new facility called the [IRIS Config Store](Config_Store_Guide.md).
 
-:warning: Full support for the [IRIS Config Store](Config_Store_Guide.md) is still a work in progress. In the current version of the AI Hub, you can still use simple environment variables to pass API keys.
 
-### Current method: Environment Variables (Requires IRIS Restart)
+### Config Store Support
 
-The standard approach is to set environment variables which can then be retrieved by InterSystems IRIS with `$SYSTEM.Util.GetEnviron()`:
+Starting with build 137, we recommend using the [IRIS Config Store](Config_Store_Guide.md) for securely managing your LLM configurations:
+
+```objectscript
+set provider =  ##class(%AI.Provider).CreateFromConfig("MyConfigName")
+```
+
+You can also reference the LLM configuration by name in your `%AI.Agent` definition (with or without the `AI.LLM.` prefix).
+
+```objectscript
+Class Demo.MyAgent Extends %AI.Agent
+{
+
+Parameter PROVIDERCONFIG = "MyConfigName";
+
+Parameter TOOLSETS = "...";
+
+XData INSTRUCTIONS [ MimeType = text/markdown ]
+{
+...
+}
+
+}
+```
+
+Check out the [Config Store guide](Config_Store_Guide.md) for more details and examples on how to store configuration data securely.
+
+### Alternative: Environment Variables (Requires IRIS Restart)
+
+As an alternative, you can still set environment variables which can then be retrieved by InterSystems IRIS with `$SYSTEM.Util.GetEnviron()`:
 
 1. Set environment variables.
     Linux and macOS:
@@ -256,59 +294,6 @@ USER> Set provider = ##class(%AI.Provider).Create("openai", {"api_key": "sk-..."
 USER> Write provider.Name
 openai
 ```
-
-### Config Store Support
-
-Support for the IRIS Config Store is still a WIP, but the following trick with the `OnInit()` callback can get you going for Agents and Providers:
-
-```objectscript
-Class Demo.MyAgent Extends %AI.Agent
-{
-
-/* ... */
-
-Parameter MODELCONFIGNAME = "MyConfigName";
-
-Method %OnInit() As %Status
-{
-    set sc = $$$OK
-    try {
-
-        if ..Provider="" && ..#MODELCONFIGNAME'="" {
-            set sc = ..GetProviderForConfig(..#MODELCONFIGNAME, .provider, .model)
-            quit:$$$ISERR(sc)
-            set ..Provider = provider
-            set ..Model = model
-        }
-
-    } catch (ex) {
-        set sc = ex.AsStatus()
-    }
-    return sc
-}
-
-/// This method will be subsumed by %AI.Provider updates
-ClassMethod GetProviderForConfig(configName as %String, Output provider As %AI.Provider, Output model as %String) as %Status [ Internal]
-{
-    set sc = $$$OK
-    try {
-        set sc = ##class(%ConfigStore.Configuration).GetDetails("AI.LLM."_configName, .details, 0, 1)
-        quit:$$$ISERR(sc)
-
-        set provider = ##class(%AI.Provider).Create(details."model_provider", details)
-
-        set model = details."model"
-
-    } catch (ex) {
-        set sc = ex.AsStatus()
-    }
-    quit sc
-}
-
-}
-```
-
-Check out the [Config Store guide](Config_Store_Guide.md) for more details and examples on how to store configuration data securely.
 
 ## Core Components
 
