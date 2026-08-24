@@ -864,7 +864,7 @@ Declarative `%AI.Agent` subclasses can list skills in the `SKILLS` parameter. Th
 Class MyApp.Agent.ProjectAssistant Extends %AI.Agent
 {
     Parameter PROVIDER = "anthropic";
-    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter APIKEY   = "@{env:ANTHROPIC_API_KEY}";
     Parameter SKILLS   = "MyApp.Skill.SummarizeDocument,MyApp.Skill.CreatePR";
 
     XData INSTRUCTIONS [ MimeType = "text/markdown" ]
@@ -971,7 +971,7 @@ Or declaratively:
 Class MyApp.Agent.Planner Extends %AI.Agent
 {
     Parameter PROVIDER = "anthropic";
-    Parameter APIKEY   = "@{env.ANTHROPIC_API_KEY}";
+    Parameter APIKEY   = "@{env:ANTHROPIC_API_KEY}";
     Parameter SKILLS   = "%AI.Skills.Planning";
 }
 ```

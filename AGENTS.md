@@ -189,9 +189,9 @@ Available in `PROVIDERCONFIG` parameters and ToolSet XData — **not** in Object
 
 | Syntax              | Source                  |
 | ------------------- | ----------------------- |
-| `@{env.VAR}`        | OS environment variable |
-| `@{config.Key}`     | `^%AI.Config` global    |
-| `@{wallet.Col.Key}` | IRIS Secure Wallet      |
+| `@{env:VAR}`        | OS environment variable |
+| `@{config:Key}`     | `^%AI.Config` global    |
+| `@{wallet:Col.Key}` | IRIS Secure Wallet      |
 
 ### ConfigStore production pattern
 

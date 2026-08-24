@@ -67,12 +67,12 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
 
       <!-- Remote MCP Server -- OAuth Bearer token
            Sends: Authorization: Bearer <token>
-           Use @{env.VAR} to inject from environment at runtime. -->
+           Use @{env:VAR} to inject from environment at runtime. -->
       <!--
       <MCP Name="SecureRemote">
         <Remote URL="https://mcp.example.com/mcp"
                 AuthType="bearer"
-                Token="@{env.MCP_TOKEN}" />
+                Token="@{env:MCP_TOKEN}" />
       </MCP>
       -->
 
@@ -83,7 +83,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
         <Remote URL="https://mcp.example.com/mcp"
                 AuthType="basic"
                 Username="_SYSTEM"
-                Password="@{env.MCP_PASSWORD}" />
+                Password="@{env:MCP_PASSWORD}" />
       </MCP>
       -->
 
@@ -94,7 +94,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
         <Remote URL="https://mcp.example.com/mcp"
                 AuthType="header"
                 HeaderName="X-API-Key"
-                HeaderValue="@{env.MCP_API_KEY}" />
+                HeaderValue="@{env:MCP_API_KEY}" />
       </MCP>
       -->
 

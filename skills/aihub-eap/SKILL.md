@@ -196,27 +196,27 @@ Used inside `PROVIDERCONFIG` parameters and ToolSet XML — NOT in ObjectScript 
 
 | Syntax              | Source                  | Example                         |
 | ------------------- | ----------------------- | ------------------------------- |
-| `@{env.VAR}`        | OS environment variable | `@{env.OPENAI_API_KEY}`         |
-| `@{config.Key}`     | `^%AI.Config` global    | `@{config.VertexSAPath}`        |
-| `@{wallet.Col.Key}` | IRIS Secure Wallet      | `@{wallet.AISecrets.anthropic}` |
+| `@{env:VAR}`        | OS environment variable | `@{env:OPENAI_API_KEY}`         |
+| `@{config:Key}`     | `^%AI.Config` global    | `@{config:VertexSAPath}`        |
+| `@{wallet:Col.Key}` | IRIS Secure Wallet      | `@{wallet:AISecrets.anthropic}` |
 
 ```objectscript
 // In a declarative agent Parameter:
 Parameter PROVIDERCONFIG = "{
     ""project_id"": ""my-gcp-project"",
     ""region"": ""us-east5"",
-    ""service_account_path"": ""@{env.VERTEX_SA_PATH}""
+    ""service_account_path"": ""@{env:VERTEX_SA_PATH}""
 }";
 
 // In ToolSet XData (MCP remote server with token from wallet):
 <MCP Name="MyServer">
     <Remote URL="https://mcp.example.com/mcp"
             AuthType="bearer"
-            Token="@{wallet.MCPSecrets.token}"/>
+            Token="@{wallet:MCPSecrets.token}"/>
 </MCP>
 ```
 
-> `@{config.AI.LLM.opsreview.APIKey}` is NOT a valid pattern.
+> `@{config:AI.LLM.opsreview.APIKey}` is NOT a valid pattern.
 > Use `GetDetails()` + `%AI.Provider.Create()` for ConfigStore-backed API keys in code.
 
 ---
@@ -382,7 +382,7 @@ mcp = init_mcp_client("AI.MCP.my-server")
 | Skills                     | Not available                            | `%AI.Agent.Skill` with XData                  |
 | RAG                        | Not available                            | `%AI.KnowledgeBase`, `EnableSmartDiscovery()` |
 | Prompt caching             | Not available                            | `"cache": {"enabled": 1}` in session config   |
-| `@{wallet.*}` substitution | Not available                            | `@{wallet.Collection.Key}`                    |
+| `@{wallet:*}` substitution | Not available                            | `@{wallet:Collection.Key}`                    |
 
 **DEAD CODE from build 141 (do not use):**
 
@@ -423,13 +423,13 @@ Only `env` and `config` prefixes work. `wallet` causes an error at runtime.
 
 ```objectscript
 // ✅ Works on 159:
-Parameter APIKEY = "@{env.OPENAI_API_KEY}";
+Parameter APIKEY = "@{env:OPENAI_API_KEY}";
 
 // ❌ Fails on 159 — wallet not registered:
-Parameter APIKEY = "@{wallet.AISecrets.openai}";
+Parameter APIKEY = "@{wallet:AISecrets.openai}";
 ```
 
-Use env vars or store keys directly in `PROVIDERCONFIG` referencing `@{env.*}`.
+Use env vars or store keys directly in `PROVIDERCONFIG` referencing `@{env:*}`.
 
 ### `%AI.LLM.Response` — use `.Content`, never `.%Get("content")`
 
@@ -475,7 +475,7 @@ docker run --name iris-ai-hub -p 1972:1972 -p 52773:52773 -d \
 ### Empty `Parameter APIKEY` auto-reads from OS environment
 
 When `APIKEY` parameter is empty (the default), `%Init()` automatically resolves
-`@{env.OPENAI_API_KEY}` (or the provider-appropriate env var).
+`@{env:OPENAI_API_KEY}` (or the provider-appropriate env var).
 
 ```objectscript
 Class MyAgent Extends %AI.Agent {

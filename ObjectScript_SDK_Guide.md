@@ -630,7 +630,7 @@ Class Sample.AI.Agent.FileSystemAgent Extends %AI.Agent
   Parameter MODEL = "claude-sonnet-4-5@20250929";
 
   /// API key -- expand from environment variable at runtime
-  Parameter APIKEY = "@{env.ANTHROPIC_API_KEY}";
+  Parameter APIKEY = "@{env:ANTHROPIC_API_KEY}";
 
   /// Comma-separated list of ToolSets
   Parameter TOOLSETS = "%AI.Tools.FileSystem";
@@ -671,8 +671,8 @@ The following table lists the relevant configuration parameters for `%AI.Agent` 
 |-----------|-------------|---------|
 | `PROVIDER` | Provider name — optional if `PROVIDERCONFIG` includes `model_provider` | `"anthropic"`, `"openai"`, `"vertex"` |
 | `MODEL` | Model ID | `"claude-sonnet-4-5@20250929"` |
-| `APIKEY` | API key — supports `@{prefix.key}` placeholders | `"@{env.OPENAI_API_KEY}"`, `"@{wallet.MySecrets.Key}"` |
-| `PROVIDERCONFIG` | Full provider config as JSON — supports `@{prefix.key}` placeholders and may include `model_provider` to replace `PROVIDER` | `"@{config.MyLLM}"`, `"{""project_id"":""my-proj"",""region"":""@{env.REGION}""}"` |
+| `APIKEY` | API key — supports `@{prefix.key}` placeholders | `"@{env:OPENAI_API_KEY}"`, `"@{wallet:MySecrets.Key}"` |
+| `PROVIDERCONFIG` | Full provider config as JSON — supports `@{prefix.key}` placeholders and may include `model_provider` to replace `PROVIDER` | `"@{config:MyLLM}"`, `"{""project_id"":""my-proj"",""region"":""@{env:REGION}""}"` |
 | `TOOLSETS` | Comma-separated ToolSet classes | `"%AI.Tools.FileSystem,%AI.Tools.SQL"` |
 
 `APIKEY` and `PROVIDERCONFIG` are composable, not mutually exclusive: use `PROVIDERCONFIG` for non-secret settings (e.g. `base_url`, `model_provider`) and `APIKEY` to separately supply the secret. If `PROVIDERCONFIG` already includes its own `"api_key"`, that value wins; `APIKEY` only fills the gap when `PROVIDERCONFIG` doesn't supply one.
@@ -690,7 +690,7 @@ The following example creates a declarative agent configuration using the `PROVI
     Parameter MODEL = "claude-sonnet-4-5@20250929";
 
     /// API key — expand from environment variable at runtime
-    Parameter APIKEY = "@{env.ANTHROPIC_API_KEY}";
+    Parameter APIKEY = "@{env:ANTHROPIC_API_KEY}";
 
     /// Comma-separated list of ToolSets
     Parameter TOOLSETS = "%AI.Tools.FileSystem";
@@ -2440,7 +2440,7 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
 </MCP>
 ```
 
-**Environment isolation.** Stdio child processes run with a clean environment — they do not inherit the IRIS process's environment, which would otherwise expose LLM API keys and other credentials to every MCP server. Any environment variable the server needs must be passed explicitly via `<Env>` elements (using literal values or `@{env.VAR}`, `@{wallet.path}` references). This is intentional: an MCP server should receive only what it is explicitly given.
+**Environment isolation.** Stdio child processes run with a clean environment — they do not inherit the IRIS process's environment, which would otherwise expose LLM API keys and other credentials to every MCP server. Any environment variable the server needs must be passed explicitly via `<Env>` elements (using literal values or `@{env:VAR}`, `@{wallet:path}` references). This is intentional: an MCP server should receive only what it is explicitly given.
 
 **Remote MCP Server with authentication:**
 
@@ -2449,7 +2449,7 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
 <MCP Name="SecureServer">
     <Remote URL="https://mcp.example.com/mcp"
             AuthType="bearer"
-            Token="@{env.MCP_TOKEN}"/>
+            Token="@{env:MCP_TOKEN}"/>
 </MCP>
 
 <!-- HTTP Basic -->
@@ -2457,7 +2457,7 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
     <Remote URL="https://mcp.example.com/mcp"
             AuthType="basic"
             Username="_SYSTEM"
-            Password="@{env.MCP_PASSWORD}"/>
+            Password="@{env:MCP_PASSWORD}"/>
 </MCP>
 
 <!-- Arbitrary header (API key or custom scheme) -->
@@ -2465,7 +2465,7 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
     <Remote URL="https://mcp.example.com/mcp"
             AuthType="header"
             HeaderName="X-API-Key"
-            HeaderValue="@{env.MCP_API_KEY}"/>
+            HeaderValue="@{env:MCP_API_KEY}"/>
 </MCP>
 ```
 
@@ -2516,14 +2516,14 @@ Use `@{prefix.key}` placeholders to pull values from external sources at runtime
 
 | Prefix | Source | Example |
 |---|---|---|
-| `env` | OS environment variable | `@{env.OPENAI_API_KEY}` |
-| `wallet` | IRIS Secure Wallet | `@{wallet.AISecrets.OpenAIKey}` |
-| `config` | InterSystems IRIS ConfigStore | `@{config.AI.LLM.ProductionLLM}` |
+| `env` | OS environment variable | `@{env:OPENAI_API_KEY}` |
+| `wallet` | IRIS Secure Wallet | `@{wallet:AISecrets.OpenAIKey}` |
+| `config` | InterSystems IRIS ConfigStore | `@{config:AI.LLM.ProductionLLM}` |
 
 ```xml
 <MCP Name="APIServer">
     <Stdio Executable="/opt/servers/api-mcp">
-        <Env Name="API_KEY" Value="@{wallet.AISecrets.ExternalAPIKey}"/>
+        <Env Name="API_KEY" Value="@{wallet:AISecrets.ExternalAPIKey}"/>
     </Stdio>
 </MCP>
 ```
@@ -2549,13 +2549,13 @@ The `config` prefix resolves named configurations from the InterSystems IRIS Con
 
 ```objectscript
 // Full FQN -- used as-is
-Parameter PROVIDERCONFIG = "@{config.AI.LLM.ProductionLLM}";
+Parameter PROVIDERCONFIG = "@{config:AI.LLM.ProductionLLM}";
 
 // Short form -- AI.LLM is prepended automatically
-Parameter PROVIDERCONFIG = "@{config.ProductionLLM}";
+Parameter PROVIDERCONFIG = "@{config:ProductionLLM}";
 
 // With subtype
-Parameter PROVIDERCONFIG = "@{config.AI.LLM.OpenAI.ProductionLLM}";
+Parameter PROVIDERCONFIG = "@{config:AI.LLM.OpenAI.ProductionLLM}";
 ```
 
 `##class(%ConfigStore.Configuration).GetDetails()` is called with `resolveSecrets=1`, so any secret references in the stored configuration are resolved to their actual values before being returned. The full JSON details object is used as the placeholder value.
