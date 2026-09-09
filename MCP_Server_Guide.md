@@ -19,6 +19,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Protocol Flow](#protocol-flow)
   - [Configuring `iris-mcp-server`](#configuring-iris-mcp-server)
     - [Configuration File Reference](#configuration-file-reference)
+    - [Multiple Listeners](#multiple-listeners)
     - [Secret and Credentials](#secret-and-credentials)
     - [CLI Flags](#cli-flags)
   - [Transport Modes](#transport-modes)
@@ -68,6 +69,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Connected but No Tools Appear](#connected-but-no-tools-appear)
     - [Tool Not Found](#tool-not-found)
     - [Authentication Failures (401/403)](#authentication-failures-401403)
+    - [Startup Fails with an Unknown Field Error](#startup-fails-with-an-unknown-field-error)
     - [Secret and Credential Resolution Failures](#secret-and-credential-resolution-failures)
     - [Debug Logging](#debug-logging)
   - [Next Steps](#next-steps)
@@ -230,16 +232,32 @@ CLI flags  >  TOML config file  >  built-in defaults
 
 [Credentials](#secrets-and-credentials) in the `.toml` file are not overridden by environment variables directly. Instead, use `@{env:VAR}` references inside the `.toml` file to read the environment variables during startup.
 
+`iris-mcp-server` rejects any unrecognized key anywhere in the `.toml` file — a typo (`endpoint` instead of `endpoints`, a misspelled field inside `[[iris]]` or `[features]`, etc.) fails at startup with a parse error naming the offending key, rather than being silently ignored as it would be in some TOML parsers.
+
 ### Configuration File Reference
 
 ```toml
 # ── MCP Transport ─────────────────────────────────────────────────────────────
+# A single [mcp] table configures one listener (shown below). To run more
+# than one listener from the same process -- e.g. a private stdio/loopback
+# interface plus a public HTTP one -- use an [[mcp]] array of tables instead.
+# See "Multiple Listeners" below.
 [mcp]
 transport  = "stdio"        # stdio | http | https
 host       = "127.0.0.1"     # bind address for HTTP/HTTPS transports (default: 127.0.0.1)
                              # IPv6 literals are also accepted, e.g. "::1" or "::".
 port       = 8080            # bind port
 base_route = "/mcp"          # HTTP route prefix (default: /mcp)
+
+# Display name for logs/diagnostics (optional). Defaults to "{host}:{port}".
+# Only worth setting when running more than one listener.
+# name = "public"
+
+# Restrict this listener to a subset of the [[iris]] backends declared below
+# (optional). Omitted (the default) exposes every registered backend --
+# unchanged behavior for a single-listener config. See "Multiple Listeners".
+# iris = ["production"]
+
 
 # Allowed Host header values for inbound HTTP/HTTPS requests (optional).
 # Localhost variants are always permitted. Default behaviour:
@@ -315,6 +333,11 @@ reconnect_interval = "30s"
 # How often to re-fetch the tool list (default: "5m").
 tool_refresh_interval = "5m"
 
+# TTL for the per-identity tool discovery cache (default: "30m"). When IRIS
+# is unreachable on a refresh, the cached tool list for that identity is
+# served until this TTL expires rather than deregistering its tools immediately.
+discovery_cache_ttl = "30m"
+
 # Maximum bytes to accumulate from InterSystems IRIS for a single tool response (default: 10 MiB).
 # Increase for tools that return very large payloads; decrease if your LLM has a
 # small context window and is being overwhelmed by large results.
@@ -381,6 +404,8 @@ provider = "env"            # env | vault  (default: env)
 level  = "info"             # error | warn | info | debug | trace
 output = "stderr"           # stderr | file
 # file = "/var/log/iris-mcp.log"   # required when output = "file"
+# ansi = true                # force ANSI colour codes on/off; omitted (default)
+                              # auto-detects based on whether stderr is a terminal
 
 # ── Optional Feature Toggles ─────────────────────────────────────────────────
 [features]
@@ -390,6 +415,45 @@ vault           = false     # enable Vault secret provider
 monitor_ipc     = true      # run the IPC metrics server `iris-mcp-server monitor` connects to
                              # (default: true); override per-invocation with --monitor-ipc/--no-monitor-ipc
 ```
+
+### Multiple Listeners
+
+A single `iris-mcp-server` process can run more than one MCP listener at once, each with its own transport, host/port, and authentication policy, all sharing the same `[[iris]]` connection pools. Use an `[[mcp]]` array of tables instead of a single `[mcp]` table:
+
+```toml
+# Private listener: stdio, for a trusted local caller (e.g. Claude Desktop).
+# Exposes every registered backend (no `iris` allow-list).
+[[mcp]]
+name      = "local"
+transport = "stdio"
+
+# Public listener: HTTP, restricted to only the "prod-public" backend below.
+# Internal tools on "prod-internal" are never registered on this listener,
+# even though both listeners share the same iris-mcp-server process and the
+# "prod-internal" connection pool stays warm for the private listener's use.
+[[mcp]]
+name      = "public"
+transport = "http"
+host      = "0.0.0.0"
+port      = 8080
+iris      = ["prod-public"]
+
+[[iris]]
+name = "prod-internal"
+server = { host = "iris.example.com", port = 52773, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
+pool = { min = 2, max = 10 }
+endpoints = [{ path = "/mcp/internal" }]
+
+[[iris]]
+name = "prod-public"
+server = { host = "iris.example.com", port = 52773, username = "@{env:WG_USER}", password = "@{env:WG_PASS}" }
+pool = { min = 2, max = 10 }
+endpoints = [{ path = "/mcp/public-api", bearer = "@{vault:iris/prod#api_token}" }]
+```
+
+Each listener's `name` is cosmetic (log/diagnostic lines only) but strongly recommended once you have more than one, since the default display name (`{host}:{port}`) doesn't distinguish `stdio` listeners from each other. Every other `[mcp]` setting covered elsewhere in this guide — `allowed_hosts`, `allowed_networks`/`denied_networks`, `allow_anonymous`, `max_connections`, `max_concurrent_requests`, `[mcp.tls]` — is set per listener, so a public listener can enforce strict network/auth policy while a private one stays permissive.
+
+The `iris` allow-list is the mechanism for scoping which tools a listener exposes: it restricts by `[[iris]]` **name**, not by endpoint path, so all endpoints under an allowed backend are exposed together. Omitting `iris` (the default) exposes every registered backend — unchanged behavior for a single-listener config. This is also how the [`iris_status`](#the-iris_status-diagnostic-tool) tool and `search_tools` (see [Smart Discovery](#smart-discovery-rag)) are scoped per listener — each only reports on, or searches within, the backends that listener is allowed to see.
 
 ### Secret and Credentials
 
@@ -1033,6 +1097,9 @@ smart_discovery = true
 
 Smart discovery is indexed automatically as tools are registered. No additional CLI flags are required.
 
+The `search_tools` results are scoped the same way `list_tools` is: only tools the calling identity's own discovery actually returned, and only backends this listener's `iris` allow-list permits (see [Multiple Listeners](#multiple-listeners)) — a caller can't use search to learn about tools on a backend it can't otherwise see. Queries are capped at 1024 bytes; longer input is rejected with an error before it reaches the embedding model.
+
+
 ---
 
 ## Monitoring & Telemetry
@@ -1366,6 +1433,12 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 2. Ensure the method is public (not marked `Private` or `Internal`).
 3. Tool names are case-sensitive — check the exact names logged during discovery with `--log-level=debug`.
 
+Two different failures both surface as "tool not found," and it matters which one you're seeing:
+
+- **A genuinely unknown or hidden tool name** (a typo, or a name filtered out by a `%CanList`/Discovery policy) raises a protocol-level error — the MCP client sees a raised exception, not a normal tool result.
+- **A tool that exists, but this caller's own identity was never granted visibility into it** (e.g. a rejected or invalid credential whose discovery never succeeded for that backend) instead returns a normal `isError: true` tool result ("Service unavailable..."), not a raised exception — this caller is never told whether the tool actually exists, only that it can't reach it. If you're building an MCP client, branch on `isError` for this case rather than only catching transport-level exceptions.
+
+
 ### Authentication Failures (401/403)
 
 **Problem:** `Tool call error: 401 Unauthorized` or `403 Forbidden`
@@ -1389,6 +1462,13 @@ Two different layers can produce a 401, and it matters which one you're seeing:
 | Development / trusted network | **Unauthenticated** |
 | Password / API key | **Password** (and supply credentials in `[[iris]] endpoints`) |
 | OAuth 2.0 Bearer tokens | **OAuth 2.0** (tokens forwarded by `iris-mcp-server` from MCP clients) |
+
+### Startup Fails with an Unknown Field Error
+
+**Problem:** Server exits immediately with a TOML deserialization error naming a field, e.g. `unknown field 'endpoint', expected 'endpoints'`
+
+Every section of the config file rejects keys it doesn't recognize rather than ignoring them — this is almost always a typo or a field from a different section pasted into the wrong place (e.g. a `[[iris]]`-level field accidentally placed inside `endpoints = [...]`). Check the exact key named in the error against [Configuration File Reference](#configuration-file-reference) for the correct name and nesting.
+
 
 ### Secret and Credential Resolution Failures
 
