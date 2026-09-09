@@ -2,12 +2,12 @@
 /// Demonstrates local tools, included policies, MCP servers, and policy composition
 Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
 {
-  XData Definition [ MimeType = application/xml ]
-  {
+XData Definition [ MimeType = application/xml ]
+{
     <ToolSet Name="AdvancedExample">
       <Description>Demonstrates local tools, included policies, MCP servers, and policy composition.</Description>
 
-      <!-- Policy Definitions. The "MCP servers" in this example are remote MCP servers consumed as tool sources, not this toolset being exposed over MCP. ConsoleAudit below writes to the current device, which is fine for terminal and agent use. If you expose this toolset through an %AI.MCP.Service, replace ConsoleAudit with a persistent %AI.Policy.Audit subclass orevery tools/call will fail with a JSON parse error. -->
+      <!-- Policy Definitions -->
       <Policies>
         <Authorization Class="Sample.AI.Policies.PathSanitizerPolicy">
           <AllowedPath>/tmp</AllowedPath>
@@ -36,7 +36,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       <MCP Name="CounterServer">
         <Stdio Executable="path/to/counter_server">
            <Env Name="RUST_LOG" Value="info"/>
-           <Env Name="TEST_VAR" Value="@{TEST_EXPANSION}"/>
+           <Env Name="TEST_VAR" Value="@{env:TEST_EXPANSION}"/>
         </Stdio>
       </MCP>
       -->
@@ -58,14 +58,14 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server -- no auth (open/internal endpoint) -->
+      <!-- Remote MCP Server - no auth (open/internal endpoint) -->
       <!--
       <MCP Name="RemoteTools">
         <Remote URL="http://localhost:3000/mcp" />
       </MCP>
       -->
 
-      <!-- Remote MCP Server -- OAuth Bearer token
+      <!-- Remote MCP Server - OAuth Bearer token
            Sends: Authorization: Bearer <token>
            Use @{env:VAR} to inject from environment at runtime. -->
       <!--
@@ -76,7 +76,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server -- HTTP Basic auth
+      <!-- Remote MCP Server - HTTP Basic auth
            Sends: Authorization: Basic base64(username:password) -->
       <!--
       <MCP Name="BasicAuthRemote">
@@ -87,7 +87,7 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       </MCP>
       -->
 
-      <!-- Remote MCP Server -- Arbitrary header (API key or custom scheme)
+      <!-- Remote MCP Server - Arbitrary header (API key or custom scheme)
            Sends the named header with the given value verbatim. -->
       <!--
       <MCP Name="ApiKeyRemote">
@@ -99,11 +99,11 @@ Class Sample.AI.Examples.AdvancedToolSet Extends %AI.ToolSet
       -->
 
     </ToolSet>
-  }
+}
 
-  /// Simple Echo tool implementation
-  Method Echo(input As %String) As %String
-  {
-      Return "Echo: " _ input
-  }
+/// Simple Echo tool implementation
+Method Echo(input As %String) As %String
+{
+    Return "Echo: " _ input
+}
 }
