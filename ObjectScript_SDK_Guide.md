@@ -17,6 +17,11 @@ The Skills API now uses progressive disclosure: a skill's instructions and tools
 
 Kimi (Moonshot AI), including the newly released `kimi-k3`, is now a supported provider: `##class(%AI.Provider).Create("kimi", {"api_key": "..."})` (alias: `"moonshot"`). Kimi's models are open-weight, so `base_url` can point at a self-hosted server or another OpenAI-compatible endpoint instead of Moonshot's own hosted API. See the provider table in [Core Components](#aiprovider---llm-provider-interface) for details.
 
+### Audio content parts
+
+`ContentPart.Audio(data, format="mp3")`/`AudioFile(filepath)` build audio content parts (OpenAI-only today -- see [Multi-Modal Content](#multi-modal-content) below for details and the Anthropic-rejection behavior).
+
+
 ### `SKILLS` parameter on declarative agents
 
 Declarative `%AI.Agent` subclasses now support a `SKILLS` parameter alongside `TOOLSETS`. This is part of the experimental Skills feature — see the [Advanced Features Guide](ObjectScript_SDK_Advanced.md#skills-aiagentskill).
