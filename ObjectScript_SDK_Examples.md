@@ -62,6 +62,10 @@ Shows how to work with images and other media types.
 **Examples:**
 - `Run()` - Analyze a satellite weather image
 - `SimpleExample()` - Compare with text-only request
+- AnalyzeBase64Image()` - Inline base64 image via `ContentPart.ImageData`
+- `AnalyzeLocalImage(filepath)` - Image from disk via `ContentPart.ImageFile` (generates a placeholder if no path given)
+- `AnalyzeDocument(filepath)` - PDF document via `ContentPart.File`, against Anthropic (OpenAI supports inline documents too; this demo just picks one provider)
+
 
 **Usage:**
 ```objectscript
