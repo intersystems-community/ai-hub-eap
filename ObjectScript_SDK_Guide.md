@@ -2799,6 +2799,10 @@ More advanced, experimental features are covered in the [Advanced Features Guide
 
 ### Multi-Modal Content
 
+`%AI.LLM.ContentPart` is the preferred way to build multi-part message content (images, documents, text) — use it instead of hand-rolling `%DynamicObject`/`%DynamicArray` JSON literals. Pass the result to `Agent.ChatWithContent`/`Agent.StreamChatWithContent`.
+
+**Images:**
+
 Send images with text prompts:
 
 ```objectscript
@@ -2823,6 +2827,53 @@ Method AnalyzeImage(imagePath As %String, question As %String) As %String
     Return response.Content
 }
 ```
+``objectscript
+Method AnalyzeImage(imagePath As %String, question As %String) As %String
+{
+    Set content = ##class(%AI.LLM.ContentPart).Build(
+        ##class(%AI.LLM.ContentPart).Text(question),
+        ##class(%AI.LLM.ContentPart).ImageFile(imagePath))
+
+    Set response = ..Agent.ChatWithContent(..Session, content)
+    Return response.Content
+}
+```
+
+`ImageFile` reads the file and base64-encodes it directly from the stream — no manual `%Stream.FileBinary`/`Base64Encode` dance, and no line-wrapping gotcha to work around. Other `ContentPart` builders:
+
+| Method | Use for |
+|---|---|
+| `Text(text)` | A plain text part |
+| `ImageURL(url, mimeType="image/jpeg")` | A remote image (provider fetches it) |
+| `ImageData(data, mimeType="image/jpeg")` | An image already in memory — `data` can be a base64 `%String` or a `%Stream.Object` |
+| `ImageFile(filepath)` | An image on disk — mime type auto-detected from the extension |
+| `Document(data, mediaType="application/pdf")` | A PDF (or other document) already in memory — same `%String`/`%Stream.Object` acceptance as `ImageData` |
+| `Audio(data, format="mp3")` | Audio already in memory — `format` is OpenAI's own vocabulary (`"mp3"` or `"wav"` as of this writing), not a MIME type |
+| `AudioFile(filepath)` | Audio on disk — format auto-detected from the `.mp3`/`.wav` extension |
+| `File(filepath)` | Auto-detects how to represent a file on disk — see below |
+
+Most vision-capable providers only accept jpeg/png/gif/webp; `ImageFile`/`File` will detect bmp/svg/tiff too, but the provider may reject those even though construction succeeds.
+
+**Both OpenAI and Anthropic support inline PDFs/documents** — OpenAI's Chat Completions API accepts them via its own `file`/`file_data` content block, and Anthropic via its native document block; `ContentPart` targets whichever wire shape the active provider expects, so `Document`/`File` work through either. Anthropic's PDF limits apply when using an Anthropic-backed agent: 32MB per request, 600 pages.
+
+```objectscript
+Method AnalyzePDF(pdfPath As %String, question As %String) As %String
+{
+    Set content = ##class(%AI.LLM.ContentPart).Build(
+        ##class(%AI.LLM.ContentPart).Text(question),
+        ##class(%AI.LLM.ContentPart).File(pdfPath))
+
+    Set response = ..Agent.ChatWithContent(..Session, content)
+    Return response.Content
+}
+```
+
+**Audio input is OpenAI-only today.** OpenAI's audio-capable models (e.g. `gpt-4o-audio-preview`) accept `Audio`/`AudioFile` content parts; Anthropic has no audio input support at all in its Messages API (direct, Bedrock, or Vertex) and rejects an `Audio` part with a clear error before the request, rather than a confusing provider-side one.
+
+**`File(filepath)` auto-detects the right representation** so callers don't need to branch on extension themselves: a recognized image extension becomes an image part; `.pdf` becomes a document part; a recognized audio extension (`.mp3`/`.wav`) becomes an audio part; anything else is content-sniffed — a UTF-8-decodable file (markdown, HTML, XML, JSON, CSV, plain text, or any other text format, with no extension-specific handling needed) becomes a text part, and genuinely binary/unrecognized content becomes a best-effort document part (`media_type: "application/octet-stream"`) rather than failing outright.
+
+Raw JSON literals (`{"type": "image", "data": ..., "mime_type": ...}`) are still accepted by the underlying bridge for advanced or dynamic construction, but `ContentPart` is the recommended API for everyday use.
+
 
 ### Logging and Debugging
 
