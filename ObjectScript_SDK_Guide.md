@@ -56,6 +56,11 @@ A new built-in experimental skill giving any agent structured long-task planning
 
 `%AI.MCP.Service` subclasses can now override `OnAuthenticate()` to validate a custom credential -- an API key from your own key-management UI, Basic auth, or any other scheme carried in the `Authorization` header -- without needing to know whether a given tool call arrives over REST or WebSocket; the base class calls it from both. See [Custom Authentication (OnAuthenticate)](#custom-authentication-onauthenticate) for details.
 
+### `TIMEOUT` class parameter for slow tools
+
+`%AI.Tool`/`%AI.ToolSet` now support a `TIMEOUT` class parameter (overridable per tool via `<Tool Timeout="...">`) so a known-slow tool isn't bound by `iris-mcp-server`'s default `request_timeout`. MCP only for now -- it has no effect on a direct `%AI.Agent`/provider tool call. See [`TIMEOUT` — declare an expected max runtime for slow tools](#timeout--declare-an-expected-max-runtime-for-slow-tools) for details.
+
+
 ---
 
 
@@ -1971,6 +1976,30 @@ Class MyApp.GlobalCounter Extends %AI.Tool
     }
 }
 ```
+
+#### `TIMEOUT` — declare an expected max runtime for slow tools
+
+By default, `iris-mcp-server` applies its own configured `request_timeout` (60s by default) to every tool call. Set `TIMEOUT` when a tool is known to run long — a slow report, a large batch query — so it isn't bound by that default:
+
+```objectscript
+Class MyApp.Tools.Reports Extends %AI.Tool
+{
+    /// This class's tools may take up to 5 minutes.
+    Parameter TIMEOUT As STRING = "5m";
+
+    ClassMethod SlowReport() As %DynamicObject { ... }
+}
+```
+
+Accepts a humantime string (`"90s"`, `"5m"`, `"1h"`, units `ns`/`us`/`ms`/`s`/`m`/`h`/`d`/`w`) or a bare integer meaning seconds. `iris-mcp-server` clamps whatever is declared here to its own operator-configured `max_tool_timeout` ceiling — a tool cannot unilaterally exceed what the operator allows. See the [`iris-mcp-server` User Guide](../MCP_SERVER_GUIDE.md#tool-timeouts) for the server-side configuration.
+
+In a `%AI.ToolSet`, `TIMEOUT` set on the ToolSet class itself applies to every tool it declares; an individual `<Tool>` can override it with its own `Timeout=` attribute:
+
+```objectscript
+<Tool Name="SlowReport" Method="SlowReport" Timeout="10m"/>
+```
+
+> **MCP only.** `TIMEOUT` is read exclusively by `iris-mcp-server` when routing an MCP tool call — it has no effect on a direct `%AI.Agent`/provider tool call made from ObjectScript, which has no equivalent deadline today. Support for honoring it there too may follow.
 
 
 ### Advanced: Custom Codec Hooks
