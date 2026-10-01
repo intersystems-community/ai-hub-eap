@@ -65,6 +65,7 @@ Shows how to work with images and other media types.
 - AnalyzeBase64Image()` - Inline base64 image via `ContentPart.ImageData`
 - `AnalyzeLocalImage(filepath)` - Image from disk via `ContentPart.ImageFile` (generates a placeholder if no path given)
 - `AnalyzeDocument(filepath)` - PDF document via `ContentPart.File`, against Anthropic (OpenAI supports inline documents too; this demo just picks one provider)
+- `ShowGenericMediaUsage()` - Structural-only demo of `ContentPart.Document()`'s generic any-media-type mechanism and the `Video()`/`VideoFile()` wrappers built on it (no live provider call -- no provider wired up here supports inline video yet)
 
 
 **Usage:**
