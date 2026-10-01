@@ -71,13 +71,14 @@ Class %AI.Policy.Authorization Extends %RegisteredObject [ Abstract ]
 {
     /// Determine if a tool execution is permitted.
     /// Returns: $$$OK to allow, $$$ERROR(...) to deny
-    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
     {
         // Must be implemented by subclasses
         Return $$$OK
     }
 }
 ```
+`toolref` is a stable identity string for the tool's *registration* -- e.g. `"iris:%AI.Tools.SQL"` for a whole ToolSet, or `"rust:my_tool"`/`"mcp:stdio:..."` for others. It is **not** JSON -- do not call `%FromJSON()` on it. Because it identifies the registration rather than an individual tool, use `call.name` (in `%CanExecute`) to get the specific tool being called; `%CanList` has no `call` object, so it reads the tool's name from `metadata.%Get("name")` instead (see [Using `<Requirement>` to pass per-tool metadata to policies](#using-requirement-to-pass-per-tool-metadata-to-policies) below).
 
 **Example: Read-Only Policy**
 
@@ -86,7 +87,7 @@ In this example, `MyApp.ReadOnlyPolicy` implements a read-only policy with an im
 ```objectscript
 Class MyApp.ReadOnlyPolicy Extends %AI.Policy.Authorization
 {
-    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
     {
         // Extract tool name
         Set toolName = call.name
@@ -118,7 +119,7 @@ Class MyApp.PathSanitizerPolicy Extends %AI.Policy.Authorization
         Return $$$OK
     }
 
-    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
     {
         // Check for path parameter in arguments
         If call.arguments.%IsDefined("path") {
@@ -419,7 +420,7 @@ Class MyApp.PathSanitizerPolicy Extends (%AI.Policy.Authorization, %XML.Adaptor)
     /// If true, deny access to paths not in AllowedPath list
     Property Strict As %Boolean(XMLPROJECTION = "ELEMENT");
 
-    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
     {
         Set path = call.arguments.%Get("path", "")
         If path = "" Return $$$OK
@@ -483,7 +484,7 @@ Class MyApp.AccessLevelPolicy Extends %AI.Policy.Authorization
     Property UserRole As %String;
 
     /// Hide tools whose AccessLevel exceeds the user's role.
-    Method %CanList(tool As %String, metadata As %DynamicObject) As %Boolean
+    Method %CanList(toolref As %String, metadata As %DynamicObject) As %Boolean
     {
         Set required = metadata.%Get("AccessLevel")
         If (required = "") Return 1                // no requirement = always visible
@@ -491,7 +492,7 @@ Class MyApp.AccessLevelPolicy Extends %AI.Policy.Authorization
         Return 1
     }
 
-    Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+    Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
     {
         Set required = metadata.%Get("AccessLevel")
         If (required = "admin") && (..UserRole '= "admin") {
@@ -513,6 +514,13 @@ Multiple `<Requirement>` elements can be combined on a single `<Include>`:
 ```
 
 All requirements are delivered as a single `%DynamicObject` — `metadata.%Get("AuditRequired")`, `metadata.%Get("DataClassification")`, etc.
+
+**Reserved keys:** in addition to your own `<Requirement>` entries, `metadata` always carries two framework-controlled keys:
+
+- `metadata.%Get("requires_auth")` — boolean; whether the tool declared itself as requiring an authorization policy to run.
+- `metadata.%Get("name")` — the individual tool's own name (e.g. `"delete_file"`). Use this in `%CanList`, which has no `call` object to read a name from otherwise; in `%CanExecute`, `call.name` is the equivalent and more direct source.
+
+Both are inserted after your own `<Requirement>` values, so they always win if you happen to declare a `<Requirement Name="requires_auth".../>` or `<Requirement Name="name".../>` yourself — avoid those two names for your own requirements.
 
 
 #### Example: Combining Global and ToolSet Policies
