@@ -1061,14 +1061,24 @@ endpoints          = [{ path = "/mcp/myapp" }]
 
 ## The `iris_status` Diagnostic Tool
 
-When `iris-mcp-server` encounters connection errors or startup failures, it exposes a special MCP tool called `iris_status` that the LLM can call to report the problem. This tool only appears in the tool list when there are active errors.
+When `iris-mcp-server` encounters connection errors or startup failures, it exposes a special MCP tool called `iris_status` that the LLM can call to report the problem. This tool only appears in the tool list when there's a recorded startup error, or a configured backend has registered zero tools — a healthy connection with nothing to report never shows it.
 
-When the LLM sees `iris_status`, it means something went wrong. Calling it returns a structured report of all current errors:
+Not every discovery failure counts as an error worth surfacing: if a caller's identity is authorized for some endpoints on a backend but denied (401/403) on others, that denial alone is not recorded — it's routine multi-route access control (e.g. an admin-only endpoint alongside a public one), not a fault. Only when *every* endpoint on a backend is denied for that identity — which implicates the identity's credentials rather than one route's access policy — or a failure isn't a plain authorization denial at all (connection refused, timeout, malformed response, 5xx) does it get recorded and `iris_status` appear.
 
-```
-iris_status result:
-- mcp_database: connection failed — refused at localhost:1972
-- mcp_analytics: authentication error — 403 Forbidden (check endpoint credentials)
+When the LLM sees `iris_status`, it means something went wrong. Calling it returns a structured JSON report:
+
+```json
+{
+  "connected_services": 1,
+  "services": ["mcp_database"],
+  "startup_errors": [
+    {
+      "timestamp": "2026-09-21T12:00:00Z",
+      "backend": "analytics",
+      "error": "Failed to connect to IRIS 'analytics': WgProto error: I/O error: connection refused"
+    }
+  ]
+}
 ```
 
 This allows the LLM to proactively report issues rather than silently failing when tools are called.
@@ -1076,10 +1086,14 @@ This allows the LLM to proactively report issues rather than silently failing wh
 `iris_status` should only be used in development; in a production environment, you should disable this tool with the `--status-tool=false` flag to ensure internal state is hidden from the LLM:
 
 ```powershell
+# Windows
 iris-mcp-server.exe --config=config.toml run --status-tool=false
 ```
-
----
+```bash
+# macOS / Linux
+iris-mcp-server --config=config.toml run --status-tool=false
+```
+----------
 
 ## Smart Discovery (RAG)
 
