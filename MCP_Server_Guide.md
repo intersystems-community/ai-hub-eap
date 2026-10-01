@@ -503,11 +503,12 @@ All flags before the subcommand are global:
 | `--iris-host=<host>` | IRIS hostname or IP |
 | `--iris-port=<port>` | IRIS super-server port |
 | `--iris-endpoint=<path>` | MCP Server path — may be repeated for multiple endpoints |
-| `--status-tool=<bool>` | Expose `iris_status` diagnostic tool (default: `true`) |
+| `--status-tool=<bool>` (or `--status-tool <bool>`) | Expose `iris_status` diagnostic tool (default: `true`) |
 | `--monitor-ipc` / `--no-monitor-ipc` | Enable/disable the local IPC metrics server `monitor` connects to (default: enabled); overrides `[features] monitor_ipc` |
 
 > Gateway credentials are supplied only through `[[iris]] server.username`/`server.password` in the config file (or `@{env:...}`/`@{vault:...}` references) — never as a CLI flag, so they never appear in `ps`/Task Manager output.
 
+`--iris-host`/`--iris-port`/`--iris-endpoint` override exactly one `[[iris]]` entry: the one named `"default"` if your config has one, otherwise the sole configured entry. If your config has more than one `[[iris]]` entry and none is named `"default"`, these flags fail at startup with an ambiguous-override error instead of guessing which backend you meant — rename one entry to `"default"`, or set the values in the config file itself.
 
 `monitor` subcommand flags (one of `--pid` or `--socket` is required):
 
