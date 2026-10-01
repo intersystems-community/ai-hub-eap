@@ -30,6 +30,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [Layer 1 - Authenticating `iris-mcp-server` to InterSystems IRIS](#layer-1---authenticating-iris-mcp-server-to-intersystems-iris)
     - [Layer 2 - MCP Endpoint Credentials](#layer-2---mcp-endpoint-credentials)
     - [Host Header Validation](#host-header-validation-multi-container-and-reverse-proxy-deployments)
+    - [Origin Header Validation](#origin-header-validation)
     - [Network Access Control (CIDR Allow/Deny Lists)](#network-access-control-cidr-allowdeny-lists)
     - [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough)
     - [OAuth 2.1 Authorization Server Proxy](#oauth-21-authorization-server-proxy)
@@ -449,8 +450,8 @@ server = { host = "iris.example.com", port = 52773, username = "@{env:WG_USER}",
 pool = { min = 2, max = 10 }
 endpoints = [{ path = "/mcp/public-api", bearer = "@{vault:iris/prod#api_token}" }]
 ```
+Each listener's `name` is cosmetic (log/diagnostic lines only) but strongly recommended once you have more than one, since the default display name (`{host}:{port}`) doesn't distinguish `stdio` listeners from each other. Every other `[mcp]` setting covered elsewhere in this guide — `allowed_hosts`, `allowed_origins`, `allowed_networks`/`denied_networks`, `allow_anonymous`, `max_connections`, `max_concurrent_requests`, `[mcp.tls]` — is set per listener, so a public listener can enforce strict network/auth policy while a private one stays permissive.
 
-Each listener's `name` is cosmetic (log/diagnostic lines only) but strongly recommended once you have more than one, since the default display name (`{host}:{port}`) doesn't distinguish `stdio` listeners from each other. Every other `[mcp]` setting covered elsewhere in this guide — `allowed_hosts`, `allowed_networks`/`denied_networks`, `allow_anonymous`, `max_connections`, `max_concurrent_requests`, `[mcp.tls]` — is set per listener, so a public listener can enforce strict network/auth policy while a private one stays permissive.
 
 The `iris` allow-list is the mechanism for scoping which tools a listener exposes: it restricts by `[[iris]]` **name**, not by endpoint path, so all endpoints under an allowed backend are exposed together. Omitting `iris` (the default) exposes every registered backend — unchanged behavior for a single-listener config. This is also how the [`iris_status`](#the-iris_status-diagnostic-tool) tool and `search_tools` (see [Smart Discovery](#smart-discovery-rag)) are scoped per listener — each only reports on, or searches within, the backends that listener is allowed to see.
 
@@ -647,6 +648,27 @@ port          = 8080
 allowed_hosts = ["mcp.example.com", "mcp.example.com:8080"]
 ```
 An IPv6 entry must be bracketed, e.g. `"[2001:db8::1]:8443"`.
+
+### Origin Header Validation
+
+`iris-mcp-server` also validates the `Origin` header on incoming HTTP/HTTPS requests, protecting against DNS-rebinding-style browser attacks. This is a separate check from Host header validation above: `Origin` is a browser-enforced header, so a request with no `Origin` header at all — true of essentially every non-browser MCP client — always passes regardless of this setting; it only ever constrains a request actually originating from a web page.
+
+The default behaviour mirrors `allowed_hosts`:
+
+| Bind address | Default behaviour |
+|---|---|
+| `127.0.0.1` / `::1` | Only the origin this listener itself serves (e.g. `http://localhost:8080`) is accepted |
+| `0.0.0.0` (public) | All `Origin` values accepted |
+
+For defence-in-depth on a public server, specify an explicit allowlist with `allowed_origins`. Each entry must include a scheme:
+
+```toml
+[mcp]
+transport       = "http"
+host            = "0.0.0.0"
+port            = 8080
+allowed_origins = ["https://app.example.com"]
+```
 
 ### Network Access Control (CIDR Allow/Deny Lists)
 
