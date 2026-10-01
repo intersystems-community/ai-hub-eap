@@ -2,6 +2,11 @@
 ///
 /// This sample demonstrates using images along with text in AI conversations.
 /// It shows how to send weather satellite images to vision-capable models.
+///
+/// See ShowGenericMediaUsage() below for %AI.LLM.ContentPart's generic
+/// escape hatch -- Document()/Video() accept ANY media type + data, not
+/// just PDFs/video, for content this class has no dedicated builder for.
+/// See the User Guide's "Multi-Modal Content" section for the full writeup.
 Class Sample.AI.Examples.MultiModal Extends %RegisteredObject
 {
 
@@ -83,6 +88,33 @@ ClassMethod SimpleExample(provider As %String = "openai", apiKey As %String = ""
         Write "Error: ", ex.DisplayString(), !
         Return ex.AsStatus()
     }
+}
+/// Demonstrates ContentPart's generic escape hatch: Document() accepts ANY
+/// media type + data, not just PDFs -- despite the method name (kept for
+/// backwards compatibility). Video()/VideoFile() are thin wrappers over the
+/// exact same mechanism, not a distinct wire shape.
+///
+/// Structural only -- no live provider call. No provider wired up in this
+/// codebase natively supports inline video today (OpenAI's "file" block
+/// and Anthropic's "document" block are both document-oriented), so
+/// sending this to ChatWithContent() would currently get a provider-side
+/// rejection. This just shows the API shape; swap in a real video file
+/// and a live agent/session once a provider adds video support.
+ClassMethod ShowGenericMediaUsage() As %Status
+{
+    Write !, "=== Generic Media Content Part Demo (structural only) ===", !
+
+    // Video() is exactly Document() under the hood -- same "file" wire type.
+    Set videoPart = ##class(%AI.LLM.ContentPart).Video("ZmFrZS12aWRlby1ieXRlcw==", "video/mp4", "clip.mp4")
+    Write "Video(): ", videoPart.%ToJSON(), !
+
+    // Document() works for ANY media type -- an EPUB here, but it could be
+    // anything this class has no named builder for.
+    Set epubPart = ##class(%AI.LLM.ContentPart).Document("ZmFrZS1lcHViLWJ5dGVz", "application/epub+zip", "book.epub")
+    Write "Document() with a non-PDF media type: ", epubPart.%ToJSON(), !
+
+    Write !, "See the User Guide's ""Multi-Modal Content"" section for the full writeup.", !
+    Return $$$OK
 }
 
 }
