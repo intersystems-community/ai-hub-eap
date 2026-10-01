@@ -731,6 +731,8 @@ When IRIS itself acts as the Authorization Server, `iris-mcp-server` can act as 
 - Rewrites endpoint URLs in the metadata response to point at `iris-mcp-server`'s own public address, keeping the IRIS backend private
 - Proxies all OAuth flows — Authorization Code + PKCE, Client Credentials, JWKS, Dynamic Client Registration — through to IRIS via wgproto
 
+`[oauth]` only applies to HTTP/HTTPS listeners — its discovery/token routes are mounted on the HTTP surface, which a `stdio` listener doesn't have. If `[oauth]` is configured alongside a `stdio` listener (or a `stdio` entry in an `[[mcp]]` array), `iris-mcp-server` logs a warning and skips OAuth setup for that listener rather than making a pointless IRIS connection.
+
 IRIS must be configured as an OAuth 2.1 Authorization Server (RFC 8414, RFC 7591) for this to work. Refer to the InterSystems IRIS OAuth documentation for the IRIS-side setup.
 
 #### Configuration
