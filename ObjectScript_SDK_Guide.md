@@ -2919,6 +2919,35 @@ Try {
 
 You can reduce costs by caching portions of input context. This is supported by various providers, including Anthropic, OpenAI (automatic), and Gemini (automatic):
 
+**`%AI.Agent.CachingEnabled` (defaults to `1`, on).** Every agent has caching enabled by
+default -- you don't need to configure anything to benefit from it, and you'll see
+`cache_creation_tokens`/`cache_read_tokens` show up in `Usage` automatically on a supported
+provider/model. To opt out entirely:
+
+```objectscript
+Set agent.CachingEnabled = 0
+```
+
+This is the simple on/off switch. The `{"cache": {...}}` config shape described below (set via
+`CreateSession`) is still there for granular control -- which prompt sections get cached, TTL,
+minimum token thresholds -- and always takes precedence over `CachingEnabled` when both are
+present.
+
+Caching is configured with a plain `%DynamicObject`, not a dedicated class -- there is no
+`%AI.LLM.CompletionOptions` class. The shape is the same wherever caching can be configured:
+
+```json
+{"enabled": 1, "cache_system_prompt": 1, "cache_tool_definitions": 1,
+ "cache_messages_before": 3, "min_tokens_for_cache": 1024}
+```
+
+`enabled` is required to turn caching on; every other key defaults as shown above when omitted.
+
+**Recommended: set it once via `CreateSession`.** This is the normal way to use caching --
+configure it when the session is created, and every subsequent `agent.Chat()`/`StreamChat()`
+call on that session benefits automatically, with no per-call options to remember:
+
+
 ```objectscript
 ClassMethod DemoCaching()
 {
