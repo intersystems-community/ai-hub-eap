@@ -267,6 +267,18 @@ base_route = "/mcp"          # HTTP route prefix (default: /mcp)
 # allowed_hosts = ["mcp.example.com", "mcp.example.com:8080"]
 # An IPv6 entry must be bracketed, e.g. "[2001:db8::1]:8443".
 
+# Allowed Origin header values for inbound HTTP/HTTPS requests (optional).
+# Protects against DNS-rebinding-style browser attacks. A request with no
+# Origin header at all -- true of essentially every non-browser MCP client --
+# always passes regardless of this setting. Default behaviour mirrors
+# allowed_hosts:
+#   loopback bind (127.0.0.1): only the origin this listener itself serves
+#                              (e.g. http://localhost:8080) is accepted.
+#   public bind  (0.0.0.0):    all Origin values accepted (a warning is logged).
+# Set to enforce a strict allowlist on a public server (each entry needs a scheme):
+# allowed_origins = ["https://app.example.com"]
+
+
 # Peer IP allow/deny lists, in CIDR notation (optional, IPv4 and IPv6 may be
 # mixed freely). Enforced at TCP-accept time, before any HTTP/TLS handshake.
 # Empty allowed_networks (the default) means all peers are allowed, subject
