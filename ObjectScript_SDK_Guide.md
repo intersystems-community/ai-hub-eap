@@ -2847,9 +2847,11 @@ Method AnalyzeImage(imagePath As %String, question As %String) As %String
 | `ImageURL(url, mimeType="image/jpeg")` | A remote image (provider fetches it) |
 | `ImageData(data, mimeType="image/jpeg")` | An image already in memory — `data` can be a base64 `%String` or a `%Stream.Object` |
 | `ImageFile(filepath)` | An image on disk — mime type auto-detected from the extension |
-| `Document(data, mediaType="application/pdf")` | A PDF (or other document) already in memory — same `%String`/`%Stream.Object` acceptance as `ImageData` |
+| `Document(data, mediaType="application/pdf")` | **The generic content-part builder** — any MIME type + data/stream, not just PDFs (see below) |
 | `Audio(data, format="mp3")` | Audio already in memory — `format` is OpenAI's own vocabulary (`"mp3"` or `"wav"` as of this writing), not a MIME type |
 | `AudioFile(filepath)` | Audio on disk — format auto-detected from the `.mp3`/`.wav` extension |
+| `Video(data, mediaType="video/mp4")` | Video already in memory — a thin wrapper over `Document`, not a distinct wire shape (see below) |
+| `VideoFile(filepath)` | Video on disk — mime type auto-detected from the extension |
 | `File(filepath)` | Auto-detects how to represent a file on disk — see below |
 
 Most vision-capable providers only accept jpeg/png/gif/webp; `ImageFile`/`File` will detect bmp/svg/tiff too, but the provider may reject those even though construction succeeds.
