@@ -1214,12 +1214,15 @@ In both cases the process ID is embedded in the socket path, preventing collisio
 - Smart discovery indexing
 
 Logging has several levels. These are ordered by least to most severe:
-1. `debug` (least severe, most verbose)
-2. `info`
-3. `warn`
-4. `error` (most severe, least verbose)
+1. `trace` (least severe, most verbose)
+2. `debug`
+3. `info`
+4. `warn`
+5. `error` (most severe, least verbose)
 
 The log level expresses the minimum severity you want to know about. This means that if you set the log level to `info`, the log will contain messages of severity `info` and above, which includes `warn` and `error`.
+
+> **Release builds:** `trace`-level log statements are compiled out of release builds entirely (`debug` is the most verbose level actually available) — `--log-level=trace` against a release binary silently behaves like `debug`. Build a debug binary if you need real `trace` output.
 
 To set the log level with flags (overrides the configuration file):
 
