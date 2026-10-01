@@ -11,7 +11,7 @@ Property AllowedPath As list Of %String(MAXLEN = "");
 /// If true, deny access to paths not in AllowedPath list
 Property Strict As %Boolean;
 
-Method %CanExecute(tool As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
+Method %CanExecute(toolref As %String, call As %DynamicObject, metadata As %DynamicObject) As %Status
 {
     // Parse arguments
     Set args = {}.%FromJSON(call.arguments)
