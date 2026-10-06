@@ -26,10 +26,10 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     - [stdio (Claude Desktop)](#stdio-claude-desktop)
     - [HTTP (Remote MCP)](#http-remote-mcp)
     - [HTTPS (Remote MCP with TLS)](#https-remote-mcp-with-tls)
-   - [Security \& Credentials](#security--credentials)
+  - [Security \& Credentials](#security--credentials)
     - [Layer 1 - Authenticating `iris-mcp-server` to InterSystems IRIS](#layer-1---authenticating-iris-mcp-server-to-intersystems-iris)
     - [Layer 2 - MCP Endpoint Credentials](#layer-2---mcp-endpoint-credentials)
-    - [Host Header Validation](#host-header-validation-multi-container-and-reverse-proxy-deployments)
+    - [Host Header Validation (Multi-Container and Reverse-Proxy Deployments)](#host-header-validation-multi-container-and-reverse-proxy-deployments)
     - [Origin Header Validation](#origin-header-validation)
     - [Network Access Control (CIDR Allow/Deny Lists)](#network-access-control-cidr-allowdeny-lists)
     - [Remote MCP — OAuth Passthrough](#remote-mcp--oauth-passthrough)
@@ -39,6 +39,9 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
       - [Token Types](#token-types)
       - [IRIS Issuer URL Requirement](#iris-issuer-url-requirement)
     - [Enterprise-Managed Authorization (EMA)](#enterprise-managed-authorization-ema)
+      - [What iris-mcp-server does](#what-iris-mcp-server-does)
+      - [Configuration options](#configuration-options)
+      - [EMA from the client side](#ema-from-the-client-side)
     - [HashiCorp Vault Integration](#hashicorp-vault-integration)
     - [Using TLS](#using-tls)
       - [`wgproto` TLS](#wgproto-tls)
@@ -139,6 +142,20 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
       - **Name**: `/mcp/simple`
       - **Dispatch Class**: `MyApp.MCP.SimpleService`
       - **Authentication**: **Password** (or **Unauthenticated** for development; **OAuth 2.0** for Remote MCP with Bearer tokens)
+  
+    Alternatively, you can create the MCP Server programmatically using `Security.Applications`:
+
+    ```objectscript
+    zn "%SYS"
+    
+    set props("NameSpace") = "USER" 
+    set props("DispatchClass") = "MyApp.MCP.SimpleService"
+    set props("Enabled") = 1
+    set props("Type") = 18
+
+    set status = ##class(Security.Applications).Create("/mcp/simple", .props)
+    do:$$$ISERR(status) $SYSTEM.Status.DisplayError(status)
+    ```
 
 3. Run `iris-mcp-server` with your configuration file:
     ```bash
