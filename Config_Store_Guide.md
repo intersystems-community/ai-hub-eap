@@ -20,6 +20,7 @@ This guide explains how to use the Config Store through the `%ConfigStore.Config
     - [Creating Configurations](#creating-configurations)
     - [Retrieving Configurations](#retrieving-configurations)
     - [Deleting Configurations](#deleting-configurations)
+    - [Testing a Configuration](#testing-a-configuration)
     - [Referencing Secrets](#referencing-secrets)
   - [Practical Examples](#practical-examples)
     - [Example 1: Setting Up an LLM Configuration with OpenAI](#example-1-setting-up-an-llm-configuration-with-openai)
@@ -151,17 +152,15 @@ Parameters:
 To retrieve a stored configuration:
 
 ```objectscript
-set config = ##class(%ConfigStore.Configuration).Get(
-    "AI",           ; Area
-    "LLM",          ; Type
-    "",             ; Subtype
-    "openai"        ; Name
+Set status = ##class(%ConfigStore.Configuration).Get(
+    "AI.LLM.openai",  ; Fully qualified name with dots
+    .config           ; config object passed by reference
 )
 ```
 
 ### Deleting Configurations
 
-Remove a configuration:
+To remove a configuration:
 
 ```objectscript
 Do ##class(%ConfigStore.Configuration).Delete(
@@ -169,15 +168,22 @@ Do ##class(%ConfigStore.Configuration).Delete(
 )
 ```
 
-Or using the full parameter syntax:
+### Testing a Configuration
+
+The `%ConfigStore.Configuration` interface comes with a `Validate()` method that verifies whether all known required elements are present, and an option to actually test whether they work (to establish a connection, typically). 
+Both are implemented for the `AI.LLM` and `AI.MCP` descriptors that ship with AI Hub.
 
 ```objectscript
-Do ##class(%ConfigStore.Configuration).Delete(
-    "AI",           ; Area
-    "LLM",          ; Type
-    "",             ; Subtype
-    "openai"        ; Name
-)
+Do ##class(%ConfigStore.Configuration).Get("AI.LLM.openai", .config)
+
+If 'config.ValidateDetails(.error) {
+    write !,"Could not validate configuration:",!,error
+} Else {
+    // no properties required for a simple test
+    Set test = 1
+    Set status = config.UseConfiguration(.props, test)
+    Do:$$$ISERR(status) $SYSTEM.Status.DisplayError(status)
+}
 ```
 
 ### Referencing Secrets
