@@ -75,12 +75,14 @@ A new built-in experimental skill giving any agent structured long-task planning
   - [What's New in This Guide](#whats-new-in-this-guide)
     - [Progressive-disclosure skills](#progressive-disclosure-skills)
     - [New provider: Kimi (Moonshot AI)](#new-provider-kimi-moonshot-ai)
+    - [Audio content parts](#audio-content-parts)
     - [`SKILLS` parameter on declarative agents](#skills-parameter-on-declarative-agents)
     - [Agent instruction templating](#agent-instruction-templating)
     - [Session persistence and restore](#session-persistence-and-restore)
     - [Provider naming: xAI](#provider-naming-xai)
     - [Planning Skill (%AI.Skills.Planning)](#planning-skill-aiskillsplanning)
     - [Custom authentication for MCP services (`OnAuthenticate`)](#custom-authentication-for-mcp-services-onauthenticate)
+    - [`TIMEOUT` class parameter for slow tools](#timeout-class-parameter-for-slow-tools)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
     - [What is the InterSystems AI Hub?](#what-is-the-intersystems-ai-hub)
@@ -128,6 +130,7 @@ A new built-in experimental skill giving any agent structured long-task planning
       - [`REQUIRESAUTH` — mark a class as requiring authorization](#requiresauth--mark-a-class-as-requiring-authorization)
       - [`DISCOVERYLIMIT` — prevent inherited methods from leaking](#discoverylimit--prevent-inherited-methods-from-leaking)
       - [`STATEFUL` — override automatic statefulness detection](#stateful--override-automatic-statefulness-detection)
+      - [`TIMEOUT` — declare an expected max runtime for slow tools](#timeout--declare-an-expected-max-runtime-for-slow-tools)
     - [Advanced: Custom Codec Hooks](#advanced-custom-codec-hooks)
       - [`%Decode` — inbound argument decoding](#decode--inbound-argument-decoding)
       - [`%Encode` — outbound return value encoding](#encode--outbound-return-value-encoding)
@@ -710,10 +713,11 @@ The following example creates a declarative agent configuration using the `PROVI
     }
     ```
 
-2. Create a new instance of the agent. Because the class definition of `Sample.AI.Agent.FileSystemAgent` already contains the provider as a parameter, you do not need to specify it on instantiation:
+2. Create a new instance of the agent. Because the class definition of `Sample.AI.Agent.FileSystemAgent` already contains the provider as a parameter, you do not need to specify it on instantiation and these will be picked up by `%Init()` automatically:
 
     ```objectscript
     Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+    Do agent.%Init()
     // Provider, model, system prompt, and toolsets are all configured!
     ```
 
