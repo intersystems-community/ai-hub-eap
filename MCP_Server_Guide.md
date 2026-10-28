@@ -223,7 +223,7 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
 **Tool discovery:**
 ```
 LLM Client  →  MCP list_tools            →  iris-mcp-server
-iris-mcp-server  →  wgproto GET /v1/services  →  InterSystems IRIS
+iris-mcp-server  →  wgproto discovery request →  InterSystems IRIS
 InterSystems IRIS  →  ToolManager.%Discover()  →  JSON tool catalog
 iris-mcp-server  →  MCP response         →  LLM Client
 ```
@@ -1062,10 +1062,12 @@ You can then add an MCP server to InterSystem IRIS that uses your service class:
 
 Discovery is on demand and scoped per caller identity, not a single global fetch done once at startup. `iris-mcp-server` doesn't know in advance which tools a given caller's IRIS-side authorization (CanList policies, role-based filtering) will actually return, so it defers fetching until it sees a request from that identity, then repeats the fetch independently for every distinct identity that connects:
 
-1. Sends `GET {endpoint}/v1/services` to IRIS (conditional GET with `If-None-Match` ETag), authenticated as that caller
+1. Sends an internal discovery request to the MCP Server in IRIS over wgproto (conditional, using an ETag), authenticated as that caller
 2. InterSystems IRIS MCP Service returns a JSON tool catalog scoped to what that identity is authorized to see
 3. `iris-mcp-server` registers the tools, computing a per-tool SHA-256 hash
 4. A service-level ETag is stored for future conditional GETs for that identity
+
+**Note:** Tool discovery is an internal exchange between iris-mcp-server and IRIS. It is not a supported endpoint for direct HTTP calls. To see which tools an MCP Server exposes, connect an MCP client and list its tools, or run iris-mcp-server with `--log-level=debug` and look for `registered N tools from <endpoint>` (see [Verifying Tool Discovery](#verifying-tool-discovery)).
 
 If discovery fails (for example, because IRIS is temporarily unreachable), the existing registration is retained so already-registered tools remain available. A fresh discovery attempt is made on the next tool call.
 
