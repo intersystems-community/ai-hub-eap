@@ -1,7 +1,7 @@
 /// Full-Access Orders ToolSet
 ///
 /// Exposes all operations from Sample.AI.Tools.OrderManagement: reads and writes.
-/// Compare with Sample.AI.ToolSet.ReadOnlyOrders, which uses Tool="^(Get|List)"
+/// Compare with Sample.AI.ToolSet.ReadOnlyOrders, which uses Match="^(Get|List)"
 /// to exclude all mutating operations.
 ///
 /// Prerequisites: Do ##class(Sample.AI.Orders.Setup).Setup()

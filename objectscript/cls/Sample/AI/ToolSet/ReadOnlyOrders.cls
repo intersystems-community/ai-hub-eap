@@ -1,7 +1,7 @@
 /// Read-Only Orders ToolSet
 ///
 /// Exposes only the safe read operations from Sample.AI.Tools.OrderManagement,
-/// using an <Include> Tool regex to select by naming convention.
+/// using an <Include> Match regex to select by naming convention.
 ///
 /// The filter Match="^(Get|List)" is a POSIX regular expression matched against
 /// each method name at compile time. It captures every method whose name begins
@@ -33,7 +33,7 @@ XData Definition [ MimeType = application/xml ]
     </Description>
 
     <!--
-      Tool="^(Get|List)" is evaluated as a POSIX regex against each method name.
+      Match="^(Get|List)" is evaluated as a POSIX regex against each method name.
       It selects all Get* and List* operations and excludes all mutating ones.
     -->
     <Include Class="Sample.AI.Tools.OrderManagement" Match="^(Get|List)"/>

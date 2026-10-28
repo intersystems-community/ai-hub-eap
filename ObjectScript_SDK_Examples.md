@@ -26,6 +26,57 @@ objectscript/
 
 ## Examples
 
+### Governed Orders over MCP
+
+`Sample.AI.ToolSet.GovernedOrders` exposes the existing Orders tools with real
+IRIS resource authorization and MCP-safe database auditing. Read operations are
+available to callers that can access the MCP service. Create, update, cancel,
+and delete operations additionally require `USE` permission on the
+`Sample_Orders_Write` resource.
+
+Unlike `Sample.AI.ToolSet.FullAccessOrders`, this ToolSet does not use
+`%AI.Policy.ConsoleAuth` or `%AI.Policy.ConsoleAudit`, so it is safe to expose
+through MCP. Its audit policy stores only the timestamp, IRIS username, tool
+name, outcome, and duration. It never stores arguments or results.
+
+Create the resource once from the `%SYS` namespace, then grant it to a role or
+user through the normal IRIS security administration workflow:
+
+```objectscript
+Set $NAMESPACE = "%SYS"
+Do ##class(Security.Resources).Create("Sample_Orders_Write")
+```
+
+Load the sample data in the application namespace:
+
+```objectscript
+Do ##class(Sample.AI.Orders.Setup).Setup()
+```
+
+Compile and run the smoke test with one terminal command:
+
+```objectscript
+Do ##class(Sample.AI.Orders.GovernanceTest).Run()
+```
+
+The default expects the current identity to have write access, which is true
+for a local container terminal running with `%All`. When executing as a reader
+identity, pass `0` to require and verify denial:
+
+```objectscript
+Do ##class(Sample.AI.Orders.GovernanceTest).Run(0)
+```
+
+Register `Sample.AI.MCP.GovernedOrdersService` as the dispatch class of an MCP
+server application. Calls execute against the current IRIS security context;
+do not treat a role name supplied in a prompt or tool argument as identity.
+
+The execution audit is available through
+`Sample_AI_Orders.AuditLog`. Authorization failures should be verified using
+the MCP error response and unchanged order state. Whether the framework also
+passes pre-execution authorization failures to `%LogExecution()` is runtime
+behavior and should not be assumed by clients.
+
 ### Basic Usage (`Sample.AI.Examples.BasicUsage`)
 
 Simple examples showing fundamental AI interactions without tools.
