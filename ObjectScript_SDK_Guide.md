@@ -597,22 +597,24 @@ Set conciseConfig = {
 Set agent.MaxIterations = 20   // allow up to 20 turns in Run()
 ```
 
-**`max_iterations` in `CreateSession`** — the inner tool-call limit per `Chat()` call. Within a single turn, the model may call multiple tools before producing a final response. This cap limits how many back-and-forth tool rounds happen inside one turn. Pass `0` or omit it entirely to remove the hard cap:
+**`max_iterations` in `CreateSession`** — the inner tool-call limit per `Chat()` call. Within a single turn, the model may call multiple tools before producing a final response. This cap limits how many back-and-forth tool rounds happen inside one turn. Pass `0` or omit it entirely to remove the hard cap. Only do this for testing, as every extra round is a paid provider call:
 
 ```objectscript
 Set session = agent.CreateSession({"max_iterations": 0})   // no inner cap
 ```
 
-**Loop detection** — a safety mechanism that runs regardless of iteration limits. After each round of tool calls, the agent checks whether the tool calls and their results are producing new information. If the same pattern repeats without progress, it first injects a strategy nudge into the context to prompt the model to try a different approach. If repetition continues, it returns a `LoopDetected` error. This catches infinite loops that a hard iteration count would not catch (e.g. the model repeatedly calling a tool that returns the same error). Setting `max_iterations = 0` is safe precisely because loop detection is always active.
+**Loop detection** — a safety mechanism that runs regardless of iteration limits. After each round of tool calls, the agent checks whether the tool calls and their results are producing new information. If the same pattern repeats without progress, it first injects a strategy nudge into the context to prompt the model to try a different approach. If repetition continues, it returns a `LoopDetected` error. This catches infinite loops that a hard iteration count would not catch (e.g. the model repeatedly calling a tool that returns the same error).  Loop detection only catches repetition. It does not stop a model that keeps making new, different tool calls, so it is not a substitute for a limit. Set `max_iterations` to a positive number unless you are watching the agent run.
 
 **Choosing values:**
 
 | Use case | `MaxIterations` | `max_iterations` |
 |---|---|---|
 | Simple Q&A, no tools | 1 | 5 |
-| Agent with a few tools | 10 (default) | 10 (default) |
-| Planning skill, multi-step | 30–50 | 0 (no cap) |
-| Unknown complexity | 20–30 | 0 (no cap) |
+| Agent with a few tools | 10 (default) | 10 |
+| Planning skill, multi-step | 30–50 | 50 |
+| Unknown complexity | 20–30 | 50 |
+
+`MaxIterations` defaults to 10. `max_iterations` has **no default**: if you leave it out, the inner loop has no limit. Always set it in production.
 
 #### Declarative Agent Configuration
 
