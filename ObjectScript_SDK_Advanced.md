@@ -1034,14 +1034,14 @@ The planning protocol makes multiple tool calls per task (at minimum: `StartTask
 
 `%AI.Agent.MaxIterations` controls how many times `Run()` calls `Chat()` (the outer loop). It defaults to 10 — keep it at a positive number suited to the number of tasks you expect.
 
-`max_iterations` in `CreateSession` controls the inner tool-call loop within each `Chat()`. Pass `0` or omit it entirely to remove that inner cap and rely on the agent's loop-detection mechanism instead:
+`max_iterations` in `CreateSession` controls the inner tool-call loop within each `Chat()`.  Planning work needs a higher inner cap than a simple chat agent. Set a generous limit rather than removing it, because loop detection only stops repeated calls, not a model that keeps making new ones:
 
 ```objectscript
 // Outer loop: allow Run() to call Chat() up to 30 times (one per planning step or task)
 Set agent.MaxIterations = 30
 
 // Inner loop: no hard cap per Chat() call -- loop detection stops runaway tool calls
-Set session = agent.CreateSession({"max_iterations": 0})
+Set session = agent.CreateSession({"max_iterations": 50})
 ```
 
 ### Inspecting Plan State After a Run
