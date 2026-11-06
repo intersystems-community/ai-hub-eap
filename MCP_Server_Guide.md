@@ -151,11 +151,17 @@ For detailed information about creating tools and toolsets in ObjectScript, see 
     set props("NameSpace") = "USER" 
     set props("DispatchClass") = "MyApp.MCP.SimpleService"
     set props("Enabled") = 1
-    set props("Type") = 18
+    set props("Type") = 18 // 2 (CSP/REST) + 16 (MCP Server) -- required, see note below
 
     set status = ##class(Security.Applications).Create("/mcp/simple", .props)
     do:$$$ISERR(status) $SYSTEM.Status.DisplayError(status)
     ```
+     **Note:** The web application must have the **MCP Server** type bit set (`Type = 18`). The **MCP Servers** 
+  page in the Management Portal sets it for you. If you create the application on the regular **Web Applications** 
+  page, or with `Security.Applications.Create` without setting `Type`, you get a plain REST application (`Type = 
+  2`). `iris-mcp-server` cannot use that type: IRIS answers its requests with a 404, the gateway logs "did not
+  identify itself" / "failed identity checking", and only `iris_status` appears in the tool list. To fix an existing
+  application, set `Type` to 18 with `Security.Applications.Modify`.
 
 3. Run `iris-mcp-server` with your configuration file:
     ```bash
@@ -1495,7 +1501,8 @@ If `iris_status` reports a clean connection but zero tools, the problem is on th
 2. Confirm all listed tool/toolset classes are compiled in the correct IRIS namespace.
 3. Confirm the that the MCP server's **Namespace** matches where the classes are compiled.
 4. Run `iris-mcp-server` with `--log-level=debug` and check the discovery log line for that endpoint. A failed discovery attempt now logs the actual error IRIS returned (e.g. a missing class name from an invalid `SPECIFICATION` entry), not just an HTTP status code — the detail usually points straight at the fix.
-5. If discovery instead fails with an identity-check error (endpoint "failed identity checking"), `iris-mcp-server` doesn't believe it's talking to `%AI.MCP.Service` at all — double check the **Dispatch Class** configured for that MCP server points at your `%AI.MCP.Service` subclass and not an unrelated REST endpoint.
+5. If discovery instead fails with an identity-check error (endpoint "failed identity checking"), `iris-mcp-server` doesn't believe it's talking to `%AI.MCP.Service` at all — double check the **Dispatch Class** configured for that MCP server points at your `%AI.MCP.Service` subclass and not an unrelated REST endpoint. The other common cause is a web application without the **MCP Server** type bit: check that `Type` is 18, not 2
+  (see the note in [Getting Started](#getting-started)).
 
 ### Tool Not Found
 
