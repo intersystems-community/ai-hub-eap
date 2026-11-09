@@ -173,11 +173,11 @@ ClassMethod Demo() As %Status
                 Write *-3
                 Write $C(27)_"[?25l"
 
-                Set renderer = ##class(%AI.System.StreamRenderer).%New()
+                Set renderer = ##class(%AI.Shell.StreamRenderer).%New() 
                 Set renderer.ThinkingPrompt = thinkingMsg
                 Set renderer.StartTime = startTime
 
-                Set responseObj = agent.StreamChat(session, input, renderer, "OnChunk")
+                Set responseObj = agent.StreamChat(session, input, renderer)
                 Do renderer.Flush()
 
                 Write $C(27)_"[?25h"
@@ -192,7 +192,7 @@ ClassMethod Demo() As %Status
                 Write gray, thinkingMsg, clr
                 Write *-3
 
-                Set feedback = ##class(%AI.System.StreamRenderer).%New()
+                Set feedback = ##class(%AI.Shell.StreamRenderer).%New()  
                 Set feedback.ThinkingPrompt = thinkingMsg
                 Set feedback.StartTime = startTime
 
