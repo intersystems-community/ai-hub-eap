@@ -1,5 +1,5 @@
 /// Simple streaming callback for demo
-Class Sample.AI.Agent.StreamCallback Extends %RegisteredObject
+Class Sample.AI.Agent.StreamCallback Extends %AI.Shell.StreamRenderer
 {
 
 /// Called at the start of streaming
