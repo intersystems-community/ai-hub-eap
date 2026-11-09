@@ -100,9 +100,9 @@ ClassMethod DemoStream() As %Status
     Write !, "Streaming response...", !
 
     // Use StreamRenderer for proper markdown rendering
-    Set renderer = ##class(%AI.System.StreamRenderer).%New()
+    Set renderer = ##class(%AI.Shell.StreamRenderer).%New()
     Set renderer.ThinkingPrompt = ""
-    Set response = agent.StreamChat(session, "Tell me about file system operations", renderer, "OnChunk")
+    Set response = agent.StreamChat(session, "Tell me about file system operations", renderer)
 
     // Flush any remaining buffered content
     Do renderer.Flush()
