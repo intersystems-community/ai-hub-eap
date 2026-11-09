@@ -777,35 +777,48 @@ The `Sample.AI.Agent.FileSystemAgent` class demonstrates the three main interact
 - **Streaming Chat** - Real-time response chunks:
 
     ```objectscript
-    ClassMethod DemoStream() As %Status
-    {
-        Write !, "=== Streaming Chat Demo ===", !
+   ClassMethod DemoStream() As %Status
+      {
+          Write !, "=== Streaming Chat Demo ===", !
 
-        // Create agent
-        Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
-        $$$ThrowOnError(agent.%Init())
+          // Create agent
+          Set agent = ##class(Sample.AI.Agent.FileSystemAgent).%New()
+          $$$ThrowOnError(agent.%Init())
 
-        // Create chat session
-        Set session = agent.CreateSession()
+          // Create chat session
+          Set session = agent.CreateSession()
 
-        // Stream interaction with callback
-        Write !, "Streaming response...", !
-        Set callback = ##class(Sample.AI.Agent.StreamCallback).%New()
-        Set response = agent.StreamChat(session, "Tell me about file system operations", callback, "OnChunk")
+          // Stream interaction with callback
+          Write !, "Streaming response...", !
+          Set callback = ##class(Sample.AI.Agent.StreamCallback).%New()
+          Set response = agent.StreamChat(session, "Tell me about file system operations", callback)
 
-        Write !, !, "Final response length: ", $LENGTH(response.Content), " chars", !
+          Write !, !, "Final response length: ", $LENGTH(response.Content), " chars", !
 
-        Return $$$OK
-    }
+          Return $$$OK
+      }
+  
+      /// Simple streaming callback for demo.
+      /// A streaming callback must extend %AI.Shell.StreamRenderer.
+      Class Sample.AI.Agent.StreamCallback Extends %AI.Shell.StreamRenderer
+      {
+          /// Called once, before the first chunk
+          Method OnBegin() As %String
+          {
+              Quit ""
+          }
 
-    /// Simple streaming callback for demo
-    Class Sample.AI.Agent.StreamCallback Extends %RegisteredObject
-    {
-        Method OnChunk(chunk As %String)
-        {
-            Write chunk
-        }
-    }
+          /// Called for each piece of the answer as it arrives
+          Method OnChunk(chunk As %String)
+          {
+              Write chunk
+          }
+  
+          /// Called once, after the last chunk
+          Method OnEnd()
+          {
+          }
+      }
     ```
 
 - **Multi-Modal Content** - Text with images or other media:
@@ -865,13 +878,12 @@ Method Chat(
     feedback As %RegisteredObject = ""
 ) As %AI.LLM.Response
 
-// Streaming interaction
-Method StreamChat(
-    session As %AI.Agent.Session,
-    input As %String,
-    callbackObj As %RegisteredObject = {$$$NULLOREF},
-    callbackMethod As %String = ""
-) As %AI.LLM.Response
+// Streaming interaction. callbackObj must extend %AI.Shell.StreamRenderer.
+  Method StreamChat(
+      session As %AI.Agent.Session,
+      input As %String,
+      callbackObj As %RegisteredObject = {$$$NULLOREF}
+  ) As %AI.LLM.Response
 
 // Multi-modal interaction
 Method ChatWithContent(
@@ -2743,25 +2755,36 @@ Class MyApp.StreamingApp
 
         Return $$$OK
     }
+ Method AskStreaming(question As %String)
+      {
+          Set callback = ##class(MyApp.StreamCallback).%New()
+          Set response = ..Agent.StreamChat(..Session, question, callback)
+          Write !, "Complete.", !
+      }   
+  }   
+  
+  /// A streaming callback must extend %AI.Shell.StreamRenderer.
+  Class MyApp.StreamCallback Extends %AI.Shell.StreamRenderer
+  {
+      Property Buffer As %String;
+      
+      Method OnBegin() As %String
+      {
+          Set ..Buffer = ""
+          Quit ""
+      }   
+      
+      Method OnChunk(chunk As %String)
+      {
+          Write chunk
+          Set ..Buffer = ..Buffer _ chunk
+      }
 
-    Method AskStreaming(question As %String)
-    {
-        Set callback = ##class(MyApp.StreamCallback).%New()
-        Set response = ..Agent.StreamChat(..Session, question, callback, "OnChunk")
-        Write !, "Complete.", !
-    }
-}
-
-Class MyApp.StreamCallback Extends %RegisteredObject
-{
-    Property Buffer As %String;
-
-    Method OnChunk(chunk As %String)
-    {
-        Write chunk
-        Set ..Buffer = ..Buffer _ chunk
-    }
-}
+      Method OnEnd()
+      {
+      }
+  }
+    
 ```
 
 ### Example: Interactive AI Shell
@@ -3108,14 +3131,19 @@ Try {
 
 ### Streaming Issues
 
-1. Verify callback method signature:
-    ```objectscript
-    Method OnChunk(chunk As %String)
-    ```
-
-2. Verify that model supports streaming
-
-3. Ensure callback object is not garbage collected
+ 1. **`InvalidStreamCallback` error** ("feedback/callback object must extend %AI.Shell.StreamRenderer"):
+     your callback class must extend `%AI.Shell.StreamRenderer`. This applies to StreamChat() and
+     StreamChatWithContent(), and to the feedback argument of Chat() and ChatWithContent().
+     
+  2. **`<PARAMETER>` error on StreamChat():** pass three arguments, `StreamChat(session, input, callback)`.
+     Older examples passed a fourth `"OnChunk"` argument, which is no longer accepted.
+     
+  3. Verify callback method signature:
+      Method OnChunk(chunk As %String)
+      
+  4. Verify that model supports streaming
+  
+  5. Ensure callback object is not garbage collected
 
 ### High Token Usage
 
