@@ -236,8 +236,9 @@ Set response = agent.Chat(session, "Your question here")
 Write response.Content
 
 // Streaming
-Set renderer = ##class(%AI.System.StreamRenderer).%New()
-Set response = agent.StreamChat(session, "Your question", renderer, "OnChunk")
+Your own callback class must extend %AI.Shell.StreamRenderer.
+Set renderer = ##class(%AI.Shell.StreamRenderer).%New()
+Set response = agent.StreamChat(session, "Your question", renderer)
 Do renderer.Flush()
 
 // Multi-modal
