@@ -89,7 +89,7 @@ A new built-in experimental skill giving any agent structured long-task planning
     - [Architecture](#architecture)
   - [Getting Started: API Key Setup](#getting-started-api-key-setup)
     - [Config Store Support](#config-store-support)
-    - [Alternative: Environment Variables (Requires IRIS Restart)](#alternative-environment-variables-requires-iris-restart)
+    - [Alternative: Environment Variables](#alternative-environment-variables)
   - [Core Components](#core-components)
     - [`%AI.Provider` - LLM Provider Interface](#aiprovider---llm-provider-interface)
     - [`%AI.Agent` - Execution Engine](#aiagent---execution-engine)
@@ -264,7 +264,7 @@ XData INSTRUCTIONS [ MimeType = text/markdown ]
 
 Check out the [Config Store guide](Config_Store_Guide.md) for more details and examples on how to store configuration data securely.
 
-### Alternative: Environment Variables (Requires IRIS Restart)
+### Alternative: Environment Variables
 
 As an alternative, you can still set environment variables which can then be retrieved by InterSystems IRIS with `$SYSTEM.Util.GetEnviron()`:
 
@@ -283,16 +283,22 @@ As an alternative, you can still set environment variables which can then be ret
     [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'sk-ant-...', 'Machine')
     ```
     
-2. Restart InterSystems IRIS to make your changes visible to the InterSystems IRIS process.
-    ```bash
-    # Then restart InterSystems IRIS
-    iris stop <instance>
-    iris start <instance>
-    ```
+2. Make the variable visible to the IRIS process that runs your agent. A terminal session (`iris session`) sees the
+  variables of the shell you start it from, so no restart is needed to test in a terminal. Web requests see only the
+  environment IRIS was started with, so restart IRIS from a shell where the variable is set. On Windows, restart 
+  InterSystems IRIS after setting the system-level variable.
+      ```bash
+      # Run from a shell where the variable is exported
+      iris stop <instance>
+      iris start <instance>
+      ```
 
-**Important:** IRIS must be restarted after setting environment variables for them to be visible to the IRIS process.
+ **Important:** An IRIS process sees the environment variables of whatever started it, as they were when it started.
+  An agent that works in your terminal can still fail when called from a web request, with `@{env:OPENAI_API_KEY} has
+  no value and no :-fallback was given`. Restarting IRIS from a shell that does not have the variable does not help.
+  For anything beyond local testing, use the [Config Store](Config_Store_Guide.md) instead.
 
-You can verify whether InterSystems IRIS can see your API key using `SYSTEM.Util.GetEnviron()`:
+You can verify whether your terminal session can see your API key using `$SYSTEM.Util.GetEnviron()`. This shows only what that session sees, not what a web request sees: 
 
 ```objectscript
 // Check environment variable
