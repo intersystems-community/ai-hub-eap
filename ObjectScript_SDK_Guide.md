@@ -465,6 +465,8 @@ Set provider = ##class(%AI.Provider).Create("openai", {
     "http_config": {
         "tls": {
             "ca_certificates": ["/etc/ssl/certs/my-internal-ca.pem"]
+            "accept_invalid_certs": false,
+            "accept_invalid_hostnames": false
         },
         "connect_timeout_secs": 10,
         "request_timeout_secs": 120
@@ -2482,6 +2484,9 @@ To expose your own InterSystems IRIS tools as an MCP server (for use by Claude D
     <Remote URL="http://localhost:8080/mcp"/>
 </MCP>
 ```
+
+**TLS for remote MCP servers.** A `<Remote>` connection trusts the operating system's certificate store. It does not use the provider's `http_config.tls` settings. If the MCP server's certificate is signed by a private CA, add that CA to the OS trust store (for example `update-ca-certificates` on Ubuntu), or set `SSL_CERT_FILE` to a bundle that
+contains the system CAs plus yours. Pointing `SSL_CERT_FILE` at your CA alone removes the public CAs and breaks provider connections. Plain `http://` URLs are accepted only for loopback addresses (`localhost`, `127.0.0.1`,`::1`).
 
 **Environment isolation.** Stdio child processes run with a clean environment — they do not inherit the IRIS process's environment, which would otherwise expose LLM API keys and other credentials to every MCP server. Any environment variable the server needs must be passed explicitly via `<Env>` elements (using literal values or `@{env:VAR}`, `@{wallet:path}` references). This is intentional: an MCP server should receive only what it is explicitly given.
 
