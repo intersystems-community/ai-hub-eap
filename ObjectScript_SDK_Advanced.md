@@ -1099,11 +1099,12 @@ The InterSystems IRIS AI RAG stack consists of three objects that you build in o
 
 #### FastEmbed (local, no API key)
 
-`%AI.RAG.Embedding.FastEmbed` runs the AllMiniLML6V2 ONNX model entirely in-process via the Rust bridge. It produces 384-dimensional vectors and has no external dependencies.
+`%AI.RAG.Embedding.FastEmbed` runs the AllMiniLML6V2 ONNX model entirely in-process via the Rust bridge. It produces 384-dimensional vectors and needs no API key. The model is not included in the kit: the first `Create()` downloads it from Hugging Face (about 87 MB) and caches it in `.fastembed_cache` under the namespace's directory, or
+in the directory set by the `FASTEMBED_CACHE_DIR` environment variable. Later calls use the cache and need no network. For servers without outbound internet access, pre-populate the cache (for example, run `Create()` once while building the image), otherwise `Create()` fails with `EmbeddingUnavailable`.
 
 ```objectscript
 Set emb = ##class(%AI.RAG.Embedding.FastEmbed).Create()
-// emb is ready immediately — %token is set in %OnInit
+// first call downloads the model (~87 MB); later calls use the cache
 ```
 
 #### OpenAI Embeddings (API key required)
