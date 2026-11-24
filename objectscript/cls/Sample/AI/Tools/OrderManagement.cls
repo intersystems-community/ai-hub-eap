@@ -12,7 +12,7 @@ Include (%AI, %occStatus)
 ///
 /// This convention lets a ToolSet use an <Include> regex to select only the
 /// read surface without enumerating individual method names:
-///   <Include Class="Sample.AI.Tools.OrderManagement" Tool="^(Get|List)"/>
+///   <Include Class="Sample.AI.Tools.OrderManagement" Match="^(Get|List)"/>
 ///
 /// See: Sample.AI.ToolSet.ReadOnlyOrders  (read-only, regex-filtered)
 ///      Sample.AI.ToolSet.FullAccessOrders (all operations)
